@@ -11,13 +11,15 @@ pub trait Transport {
         checksum_filepath: &Path,
     ) -> Result<ChecksumTree, Box<dyn Error>>;
 
-    async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn std::error::Error>>;
+    async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn Error>>;
 
     async fn upload(
         &mut self,
         filename: &Path,
         read: Box<dyn Read + Send>,
-    ) -> Result<u64, Box<dyn std::error::Error>>;
+    ) -> Result<u64, Box<dyn Error>>;
+
+    async fn remove(&mut self, pathname: &Path) -> Result<(), Box<dyn Error>>;
 
     async fn close(self: Box<Self>) -> Result<(), Box<dyn Error>>;
 }
