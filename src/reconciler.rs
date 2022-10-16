@@ -49,6 +49,7 @@ impl Reconciler {
                             _ => (),
                         };
                     }
+
                     // check for file or create file
                     let leaf = stack.last_mut().unwrap();
                     match leaf {
@@ -66,10 +67,10 @@ impl Reconciler {
                                     actions.push(Action::Put(next_depth.iter().collect()));
                                 }
                             } else {
-                                dir.insert(
-                                    filename.clone(),
-                                    ChecksumElement::File(new_checksum.clone()),
-                                );
+                                // dir.insert(
+                                //     filename.clone(),
+                                //     ChecksumElement::File(new_checksum.clone()),
+                                // );
                                 actions.push(Action::Put(next_depth.iter().collect()));
                             }
                         }
@@ -91,6 +92,23 @@ impl Reconciler {
                 }
             }
         }
+
+        // collect files that left in previous and mark them to be removed
+        let mut stack: Vec<(PathBuf, &ChecksumElement)> = vec![("".into(), &previous_checksum)];
+        while !stack.is_empty() {
+            let (path, current) = stack.pop().unwrap();
+            match current {
+                ChecksumElement::Root(dir) | ChecksumElement::Directory(dir) => {
+                    dir.iter().for_each(|(dir_name, element)| {
+                        let mut new_path = path.clone();
+                        new_path.push(dir_name);
+                        stack.push((new_path, element));
+                    });
+                }
+                ChecksumElement::File(_) => actions.push(Action::Remove(path.into())),
+            }
+        }
+
         actions
     }
 }
@@ -237,6 +255,21 @@ mod tests {
         assert!(!diff.is_empty());
         diff.into_iter()
             .zip(vec![Action::Remove("./file.txt".into())])
+            .for_each(|(a, b)| assert_eq!(a, b));
+    }
+
+    #[test]
+    fn remove_from_one_level_deep() {
+        let mut prev = HashMap::new();
+        prev.insert("./direktory/file.txt".to_string(), "sha256hash".to_string());
+        let prev: ChecksumTree = prev.into();
+        let next: ChecksumTree = ChecksumTree::default();
+
+        let diff = Reconciler::reconcile(prev, &next);
+
+        assert!(!diff.is_empty());
+        diff.into_iter()
+            .zip(vec![Action::Remove("./direktory/file.txt".into())])
             .for_each(|(a, b)| assert_eq!(a, b));
     }
 }

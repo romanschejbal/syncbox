@@ -62,17 +62,11 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
-
     let now = std::time::Instant::now();
-
-    let duration_since_epoch = std::time::UNIX_EPOCH.elapsed()?;
-    if duration_since_epoch.as_secs() > 1665840614 + 2592000 {
-        return Err("please contact the author".into());
-    }
 
     std::env::set_current_dir(args.directory)?;
 
-    println!("{} 🔍 Resolving files", style("[1/8]").dim().bold());
+    println!("{} 🔍 Resolving files", style("[1/9]").dim().bold());
 
     let mut ignored_files = vec![OsString::from(".git")];
     ignored_files.push((&args.checksum_file).into());
@@ -89,7 +83,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .collect::<Vec<_>>();
 
     // build map with checksums
-    println!("{} 🧬 Calculating checksums", style("[2/8]").dim().bold());
+    println!("{} 🧬 Calculating checksums", style("[2/9]").dim().bold());
     let pb = &indicatif::ProgressBar::new(files.len().try_into()?);
     let next_checksum_tree: ChecksumTree = stream::iter(files)
         .then(|filepath| async move {
@@ -118,7 +112,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // get previous checksums using Transport
     println!(
         "{} 📄 Fetching last checksum file",
-        style("[3/8]").dim().bold(),
+        style("[3/9]").dim().bold(),
     );
 
     let mut transport: Box<dyn Transport> = if args.dry_run {
@@ -136,7 +130,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await?;
 
     // reconcile
-    println!("{} 🚚 Reconciling changes", style("[4/8]").dim().bold(),);
+    println!("{} 🚚 Reconciling changes", style("[4/9]").dim().bold(),);
     let todo = Reconciler::reconcile(previous_checksum_tree, &next_checksum_tree);
 
     if todo.is_empty() {
@@ -146,7 +140,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!(
         "{} 🚀 Executing {} action(s)",
-        style("[5/8]").dim().bold(),
+        style("[5/9]").dim().bold(),
         style(todo.len()).bold()
     );
     let next_checksum_tree = Arc::new(Mutex::new(next_checksum_tree));
@@ -154,7 +148,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut has_error = false;
 
     // first create directories
-    println!("{} 📂 Creating directories", style("[6/8]").dim().bold(),);
+    println!("{} 📂 Creating directories", style("[6/9]").dim().bold(),);
     let create_directory_actions: Vec<_> = todo
         .iter()
         .filter(|action| matches!(action, Action::Mkdir(_)))
@@ -182,7 +176,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // upload files
     let mut bytes = 0;
-    println!("{} 🏂 Uploading files", style("[7/8]").dim().bold(),);
+    println!("{} 🏂 Uploading files", style("[7/9]").dim().bold(),);
     let put_actions: Vec<_> = todo
         .iter()
         .filter(|action| matches!(action, Action::Put(_)))
@@ -216,7 +210,38 @@ async fn main() -> Result<(), Box<dyn Error>> {
         };
     }
 
-    println!("{} 🏁 Uploading checksum", style("[8/8]").dim().bold(),);
+    // removing files
+    println!("{} 🧻 Removing files", style("[8/9]").dim().bold(),);
+    let remove_actions: Vec<_> = todo
+        .iter()
+        .filter(|action| matches!(action, Action::Remove(_)))
+        .collect();
+    for (i, action) in remove_actions.iter().enumerate() {
+        let n = std::time::Instant::now();
+
+        match action {
+            Action::Remove(path) => {
+                match transport.remove(path).await {
+                    Ok(_) => {
+                        println!(
+                            "      ✅ Removed {}/{} file: {:?} in {:.2?}s",
+                            i + 1,
+                            remove_actions.len(),
+                            path,
+                            n.elapsed().as_secs_f64(),
+                        );
+                    }
+                    Err(error) => {
+                        eprintln!("      ❌ Error while removing {:?}: {}", path, error);
+                        has_error = true;
+                    }
+                };
+            }
+            _ => unreachable!(),
+        };
+    }
+
+    println!("{} 🏁 Uploading checksum", style("[9/9]").dim().bold(),);
     // save checksum
     let next_checksum_tree = Arc::try_unwrap(next_checksum_tree)
         .map_err(|_| <&str as Into<Box<dyn Error>>>::into("Failed to update checksums"))?

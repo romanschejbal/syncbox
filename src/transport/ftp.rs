@@ -78,7 +78,7 @@ impl Transport for FTP<Connected> {
             .unwrap_or_default())
     }
 
-    async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn Error>> {
         match self
             .stream
             .as_mut()
@@ -101,7 +101,7 @@ impl Transport for FTP<Connected> {
         &mut self,
         filename: &Path,
         mut r: Box<dyn Read + Send>,
-    ) -> Result<u64, Box<dyn std::error::Error>> {
+    ) -> Result<u64, Box<dyn Error>> {
         self.stream
             .as_mut()
             .unwrap()
@@ -113,6 +113,29 @@ impl Transport for FTP<Connected> {
                 &mut r,
             )
             .map_err(|e| e.into())
+    }
+
+    async fn remove(&mut self, mut pathname: &Path) -> Result<(), Box<dyn Error>> {
+        self.stream.as_mut().unwrap().rm(pathname
+            .to_str()
+            .ok_or(format!("Failed converting Path to str: {pathname:?}"))
+            .map_err(FtpError::SecureError)?)?;
+
+        while let Some(parent_pathname) = pathname.parent() {
+            self.stream
+                .as_mut()
+                .unwrap()
+                .rmdir(
+                    parent_pathname
+                        .to_str()
+                        .ok_or(format!("Failed converting Path to str: {pathname:?}"))
+                        .map_err(FtpError::SecureError)?,
+                )
+                .ok(); // ignore errors about deleting directories
+            pathname = parent_pathname;
+        }
+
+        Ok(())
     }
 
     async fn close(mut self: Box<Self>) -> Result<(), Box<dyn Error>> {

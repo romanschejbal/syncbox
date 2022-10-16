@@ -26,6 +26,7 @@ impl ChecksumTree {
         self.root
     }
 
+    /// Used for when there was error uploading files
     pub fn remove_at(&mut self, path: &Path) {
         let root_dir = match self.root {
             ChecksumElement::Root(ref mut dir) | ChecksumElement::Directory(ref mut dir) => {
@@ -39,10 +40,9 @@ impl ChecksumTree {
             path_str.push(component);
             match stack.last_mut().unwrap() {
                 ChecksumElement::Directory(dir) => {
-                    let next = dir
-                        .remove(&component.to_string_lossy().to_string())
-                        .unwrap();
-                    stack.push(next);
+                    if let Some(next) = dir.remove(&component.to_string_lossy().to_string()) {
+                        stack.push(next);
+                    }
                 }
                 _ => unreachable!(),
             }
