@@ -1,11 +1,11 @@
 use crate::checksum_tree::{ChecksumElement, ChecksumTree};
 use std::{collections::VecDeque, path::PathBuf};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Action {
     Mkdir(PathBuf),
     Put(PathBuf),
-    Remove(String),
+    Remove(PathBuf),
 }
 
 pub struct Reconciler {}
@@ -92,5 +92,151 @@ impl Reconciler {
             }
         }
         actions
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn empty() {
+        let prev = ChecksumTree::default();
+        let next = ChecksumTree::default();
+        let diff = Reconciler::reconcile(prev, &next);
+
+        assert!(diff.is_empty());
+    }
+
+    #[test]
+    fn insert_into_root() {
+        let prev = ChecksumTree::default();
+        let mut next = HashMap::new();
+        next.insert("./file.txt".to_string(), "sha256hash".to_string());
+        let next: ChecksumTree = next.into();
+
+        let diff = Reconciler::reconcile(prev, &next);
+
+        assert!(!diff.is_empty());
+        diff.into_iter()
+            .zip(vec![Action::Put("./file.txt".into())])
+            .for_each(|(a, b)| assert_eq!(a, b));
+    }
+
+    #[test]
+    fn insert_one_level_deep_with_create_directory() {
+        let prev = ChecksumTree::default();
+        let mut next = HashMap::new();
+        next.insert("./direktory/file.txt".to_string(), "sha256hash".to_string());
+        let next: ChecksumTree = next.into();
+
+        let diff = Reconciler::reconcile(prev, &next);
+
+        assert!(!diff.is_empty());
+        diff.into_iter()
+            .zip(vec![
+                Action::Mkdir("./direktory".into()),
+                Action::Put("./direktory/file.txt".into()),
+            ])
+            .for_each(|(a, b)| assert_eq!(a, b));
+    }
+
+    #[test]
+    fn insert_two_levels_deep_with_create_directories() {
+        let prev = ChecksumTree::default();
+        let mut next = HashMap::new();
+        next.insert(
+            "./direktory/nested/file.txt".to_string(),
+            "sha256hash".to_string(),
+        );
+        let next: ChecksumTree = next.into();
+
+        let diff = Reconciler::reconcile(prev, &next);
+
+        assert!(!diff.is_empty());
+        diff.into_iter()
+            .zip(vec![
+                Action::Mkdir("./direktory".into()),
+                Action::Mkdir("./direktory/nested".into()),
+                Action::Put("./direktory/nested/file.txt".into()),
+            ])
+            .for_each(|(a, b)| assert_eq!(a, b));
+    }
+
+    #[test]
+    fn update_in_root() {
+        let mut prev = HashMap::new();
+        prev.insert("./file.txt".to_string(), "sha256hash".to_string());
+        let prev: ChecksumTree = prev.into();
+        let mut next = HashMap::new();
+        next.insert("./file.txt".to_string(), "sha256hashThatsNew".to_string());
+        let next: ChecksumTree = next.into();
+
+        let diff = Reconciler::reconcile(prev, &next);
+
+        assert!(!diff.is_empty());
+        diff.into_iter()
+            .zip(vec![Action::Put("./file.txt".into())])
+            .for_each(|(a, b)| assert_eq!(a, b));
+    }
+
+    #[test]
+    fn update_one_level_deep_with_create_directory() {
+        let mut prev = HashMap::new();
+        prev.insert("./direktory/file.txt".to_string(), "sha256hash".to_string());
+        let prev: ChecksumTree = prev.into();
+        let mut next = HashMap::new();
+        next.insert(
+            "./direktory/file.txt".to_string(),
+            "sha256hashThatsNew".to_string(),
+        );
+        let next: ChecksumTree = next.into();
+
+        let diff = Reconciler::reconcile(prev, &next);
+
+        assert!(!diff.is_empty());
+        diff.into_iter()
+            .zip(vec![Action::Put("./direktory/file.txt".into())])
+            .for_each(|(a, b)| assert_eq!(a, b));
+    }
+
+    #[test]
+    fn update_two_levels_deep_with_create_directories() {
+        let mut prev = HashMap::new();
+        prev.insert(
+            "./direktory/nested/file.txt".to_string(),
+            "sha256hash".to_string(),
+        );
+        let prev: ChecksumTree = prev.into();
+        let mut next = HashMap::new();
+        next.insert(
+            "./direktory/nested/file.txt".to_string(),
+            "sha256hashThatsNew".to_string(),
+        );
+        let next: ChecksumTree = next.into();
+
+        let diff = Reconciler::reconcile(prev, &next);
+
+        assert!(!diff.is_empty());
+        diff.into_iter()
+            .zip(vec![Action::Put("./direktory/nested/file.txt".into())])
+            .for_each(|(a, b)| assert_eq!(a, b));
+    }
+
+    #[test]
+    fn remove_from_root() {
+        let mut prev = HashMap::new();
+        prev.insert("./file.txt".to_string(), "sha256hash".to_string());
+        let prev: ChecksumTree = prev.into();
+        let next: ChecksumTree = ChecksumTree::default();
+
+        let diff = Reconciler::reconcile(prev, &next);
+
+        assert!(!diff.is_empty());
+        diff.into_iter()
+            .zip(vec![Action::Remove("./file.txt".into())])
+            .for_each(|(a, b)| assert_eq!(a, b));
     }
 }
