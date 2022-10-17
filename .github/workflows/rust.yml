@@ -18,7 +18,7 @@ jobs:
       - name: Build
         run: cargo build
       - name: Clippy
-        run: cargo clippy
+        run: cargo clippy -- -D warnings
       - name: Run tests
         run: cargo test
       - name: Build release
@@ -28,4 +28,4 @@ jobs:
         with:
           name: Executables
           path: |
-            target
+            target/*/syncbox
