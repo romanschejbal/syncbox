@@ -34,20 +34,17 @@ impl Reconciler {
                     for key in next_depth.iter().take(next_depth.len() - 1) {
                         path.push(*key);
                         let currently_searching = stack.last_mut().unwrap();
-                        match currently_searching {
-                            ChecksumElement::Directory(dir) => {
-                                if let Some(next_to_search) = dir.remove(*key) {
-                                    stack.push(next_to_search);
-                                } else {
-                                    let new_dir = ChecksumElement::Directory(Default::default());
-                                    stack.push(new_dir);
-                                    // ignore "." directories
-                                    if path.len() > 1 {
-                                        actions.push(Action::Mkdir(path.iter().collect()));
-                                    }
+                        if let ChecksumElement::Directory(dir) = currently_searching {
+                            if let Some(next_to_search) = dir.remove(*key) {
+                                stack.push(next_to_search);
+                            } else {
+                                let new_dir = ChecksumElement::Directory(Default::default());
+                                stack.push(new_dir);
+                                // ignore "." directories
+                                if path.len() > 1 {
+                                    actions.push(Action::Mkdir(path.iter().collect()));
                                 }
                             }
-                            _ => (),
                         };
                     }
 
@@ -78,11 +75,8 @@ impl Reconciler {
                     while stack.len() > 1 {
                         let child = stack.pop().unwrap();
                         let parent = stack.last_mut().unwrap();
-                        match parent {
-                            ChecksumElement::Directory(dir) => {
-                                dir.insert(path.pop().unwrap().clone(), child);
-                            }
-                            _ => (),
+                        if let ChecksumElement::Directory(dir) = parent {
+                            dir.insert(path.pop().unwrap().clone(), child);
                         }
                     }
                     previous_checksum = stack.pop().unwrap();
