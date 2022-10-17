@@ -137,7 +137,7 @@ mod tests {
 
         let diff = Reconciler::reconcile(prev, &next);
 
-        assert!(!diff.is_empty());
+        assert!(diff.len() == 1);
         diff.into_iter()
             .zip(vec![Action::Put("./file.txt".into())])
             .for_each(|(a, b)| assert_eq!(a, b));
@@ -152,7 +152,7 @@ mod tests {
 
         let diff = Reconciler::reconcile(prev, &next);
 
-        assert!(!diff.is_empty());
+        assert!(diff.len() == 2);
         diff.into_iter()
             .zip(vec![
                 Action::Mkdir("./direktory".into()),
@@ -173,7 +173,7 @@ mod tests {
 
         let diff = Reconciler::reconcile(prev, &next);
 
-        assert!(!diff.is_empty());
+        assert!(diff.len() == 3);
         diff.into_iter()
             .zip(vec![
                 Action::Mkdir("./direktory".into()),
@@ -194,7 +194,7 @@ mod tests {
 
         let diff = Reconciler::reconcile(prev, &next);
 
-        assert!(!diff.is_empty());
+        assert!(diff.len() == 1);
         diff.into_iter()
             .zip(vec![Action::Put("./file.txt".into())])
             .for_each(|(a, b)| assert_eq!(a, b));
@@ -214,7 +214,7 @@ mod tests {
 
         let diff = Reconciler::reconcile(prev, &next);
 
-        assert!(!diff.is_empty());
+        assert!(diff.len() == 1);
         diff.into_iter()
             .zip(vec![Action::Put("./direktory/file.txt".into())])
             .for_each(|(a, b)| assert_eq!(a, b));
@@ -237,7 +237,7 @@ mod tests {
 
         let diff = Reconciler::reconcile(prev, &next);
 
-        assert!(!diff.is_empty());
+        assert!(diff.len() == 1);
         diff.into_iter()
             .zip(vec![Action::Put("./direktory/nested/file.txt".into())])
             .for_each(|(a, b)| assert_eq!(a, b));
@@ -252,7 +252,7 @@ mod tests {
 
         let diff = Reconciler::reconcile(prev, &next);
 
-        assert!(!diff.is_empty());
+        assert!(diff.len() == 1);
         diff.into_iter()
             .zip(vec![Action::Remove("./file.txt".into())])
             .for_each(|(a, b)| assert_eq!(a, b));
@@ -267,7 +267,7 @@ mod tests {
 
         let diff = Reconciler::reconcile(prev, &next);
 
-        assert!(!diff.is_empty());
+        assert!(diff.len() == 1);
         diff.into_iter()
             .zip(vec![Action::Remove("./direktory/file.txt".into())])
             .for_each(|(a, b)| assert_eq!(a, b));
@@ -302,7 +302,7 @@ mod tests {
 
         let diff = Reconciler::reconcile(prev, &next);
 
-        assert!(!diff.is_empty());
+        assert!(diff.len() == 2);
         diff.into_iter()
             .zip(vec![
                 Action::Put("./direktory2/nested/file2.txt".into()),
