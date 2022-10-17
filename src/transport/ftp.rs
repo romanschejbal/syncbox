@@ -122,7 +122,8 @@ impl Transport for FTP<Connected> {
             .map_err(FtpError::SecureError)?)?;
 
         while let Some(parent_pathname) = pathname.parent() {
-            self.stream
+            if self
+                .stream
                 .as_mut()
                 .unwrap()
                 .rmdir(
@@ -131,7 +132,12 @@ impl Transport for FTP<Connected> {
                         .ok_or(format!("Failed converting Path to str: {pathname:?}"))
                         .map_err(FtpError::SecureError)?,
                 )
-                .ok(); // ignore errors about deleting directories
+                .ok()
+                .is_none()
+            {
+                // ignore errors about deleting directories but bail out on first error
+                break;
+            }
             pathname = parent_pathname;
         }
 
