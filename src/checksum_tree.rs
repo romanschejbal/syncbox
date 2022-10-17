@@ -1,9 +1,12 @@
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, ops::Deref, path::Path};
+use std::{
+    collections::HashMap,
+    ops::{Deref, DerefMut},
+    path::Path,
+};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum ChecksumElement {
-    Root(HashMap<String, ChecksumElement>),
     #[serde(rename = "d", alias = "Directory")]
     Directory(HashMap<String, ChecksumElement>),
     #[serde(rename = "f", alias = "File")]
@@ -12,31 +15,32 @@ pub enum ChecksumElement {
 
 impl Default for ChecksumElement {
     fn default() -> Self {
-        Self::Root(HashMap::default())
+        Self::Directory(HashMap::default())
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, Default)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ChecksumTree {
-    root: ChecksumElement,
+    root: Option<ChecksumElement>,
 }
 
 impl ChecksumTree {
-    pub fn get_root(self) -> ChecksumElement {
-        self.root
+    fn new() -> Self {
+        Self {
+            root: Some(ChecksumElement::default()),
+        }
+    }
+
+    pub fn get_root(&mut self) -> &mut Option<ChecksumElement> {
+        &mut self.root
     }
 
     /// Used for when there was error uploading files
     pub fn remove_at(&mut self, path: &Path) {
-        let root_dir = match self.root {
-            ChecksumElement::Root(ref mut dir) | ChecksumElement::Directory(ref mut dir) => {
-                dir.remove(".").unwrap()
-            }
-            _ => unreachable!(),
-        };
+        let root_dir = self.get_root().take().unwrap();
         let mut stack = vec![root_dir];
         let mut path_str = vec![];
-        for component in path.iter().skip(1) {
+        for component in path.iter() {
             path_str.push(component);
             match stack.last_mut().unwrap() {
                 ChecksumElement::Directory(dir) => {
@@ -64,7 +68,13 @@ impl ChecksumTree {
         assert!(stack.len() == 1);
         let mut hashmap: HashMap<String, ChecksumElement> = Default::default();
         hashmap.insert(".".to_string(), stack.pop().unwrap());
-        self.root = ChecksumElement::Root(hashmap);
+        self.root = Some(ChecksumElement::Directory(hashmap));
+    }
+}
+
+impl Default for ChecksumTree {
+    fn default() -> Self {
+        ChecksumTree::new()
     }
 }
 
@@ -78,8 +88,7 @@ impl From<HashMap<String, String>> for ChecksumTree {
             for component in path {
                 let parent = stack.pop().unwrap();
                 match parent {
-                    ChecksumElement::Root(mut parent_map)
-                    | ChecksumElement::Directory(mut parent_map) => {
+                    ChecksumElement::Directory(mut parent_map) => {
                         let map = parent_map
                             .remove(component.to_string_lossy().as_ref())
                             .unwrap_or_default();
@@ -123,14 +132,20 @@ impl From<HashMap<String, String>> for ChecksumTree {
         assert!(stack.len() == 1);
 
         Self {
-            root: stack.pop().unwrap(),
+            root: Some(stack.pop().unwrap()),
         }
     }
 }
 
 impl Deref for ChecksumTree {
-    type Target = ChecksumElement;
+    type Target = Option<ChecksumElement>;
     fn deref(&self) -> &Self::Target {
         &self.root
+    }
+}
+
+impl DerefMut for ChecksumTree {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.root
     }
 }

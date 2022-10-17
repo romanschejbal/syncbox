@@ -85,7 +85,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // build map with checksums
     println!("{} 🧬 Calculating checksums", style("[2/9]").dim().bold());
     let pb = &indicatif::ProgressBar::new(files.len().try_into()?);
-    let next_checksum_tree: ChecksumTree = stream::iter(files)
+    let mut next_checksum_tree: ChecksumTree = stream::iter(files)
         .then(|filepath| async move {
             let checksum = sha256::digest_file(&filepath)
                 .map_err(|e| format!("Failed checksum of {filepath:?} with error {e:?}"))?;
@@ -131,7 +131,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // reconcile
     println!("{} 🚚 Reconciling changes", style("[4/9]").dim().bold(),);
-    let todo = Reconciler::reconcile(previous_checksum_tree, &next_checksum_tree);
+    let todo = Reconciler::reconcile(previous_checksum_tree, &mut next_checksum_tree);
 
     if todo.is_empty() {
         println!("      🤷 Nothing to do");

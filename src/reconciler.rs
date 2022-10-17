@@ -1,5 +1,5 @@
 use crate::checksum_tree::{ChecksumElement, ChecksumTree};
-use std::{collections::VecDeque, path::PathBuf};
+use std::{collections::VecDeque, ops::DerefMut, path::PathBuf};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Action {
@@ -11,14 +11,15 @@ pub enum Action {
 pub struct Reconciler {}
 
 impl Reconciler {
-    pub fn reconcile(prev: ChecksumTree, next: &ChecksumTree) -> Vec<Action> {
-        let mut previous_checksum = prev.get_root();
+    pub fn reconcile(mut prev: ChecksumTree, next: &mut ChecksumTree) -> Vec<Action> {
+        let mut previous_checksum = prev.get_root().take().unwrap();
         let mut actions = vec![];
-        let mut to_reconcile = VecDeque::from([(vec![], &**next)]);
+        let root = next.deref_mut().take().unwrap();
+        let mut to_reconcile = VecDeque::from([(vec![], &root)]);
         while !to_reconcile.is_empty() {
             let (next_depth, next) = to_reconcile.pop_front().unwrap();
             match next {
-                ChecksumElement::Root(dir) | ChecksumElement::Directory(dir) => {
+                ChecksumElement::Directory(dir) => {
                     // create vec of path to do lookup for
                     for (path, element) in dir {
                         let mut new_depth = next_depth.clone();
@@ -34,7 +35,7 @@ impl Reconciler {
                         path.push(*key);
                         let currently_searching = stack.last_mut().unwrap();
                         match currently_searching {
-                            ChecksumElement::Root(dir) | ChecksumElement::Directory(dir) => {
+                            ChecksumElement::Directory(dir) => {
                                 if let Some(next_to_search) = dir.remove(*key) {
                                     stack.push(next_to_search);
                                 } else {
@@ -53,7 +54,7 @@ impl Reconciler {
                     // check for file or create file
                     let leaf = stack.last_mut().unwrap();
                     match leaf {
-                        ChecksumElement::Root(dir) | ChecksumElement::Directory(dir) => {
+                        ChecksumElement::Directory(dir) => {
                             let filename = *next_depth.last().unwrap();
 
                             if let Some(element) = dir.remove(filename) {
@@ -67,10 +68,6 @@ impl Reconciler {
                                     actions.push(Action::Put(next_depth.iter().collect()));
                                 }
                             } else {
-                                // dir.insert(
-                                //     filename.clone(),
-                                //     ChecksumElement::File(new_checksum.clone()),
-                                // );
                                 actions.push(Action::Put(next_depth.iter().collect()));
                             }
                         }
@@ -82,7 +79,7 @@ impl Reconciler {
                         let child = stack.pop().unwrap();
                         let parent = stack.last_mut().unwrap();
                         match parent {
-                            ChecksumElement::Root(dir) | ChecksumElement::Directory(dir) => {
+                            ChecksumElement::Directory(dir) => {
                                 dir.insert(path.pop().unwrap().clone(), child);
                             }
                             _ => (),
@@ -98,7 +95,7 @@ impl Reconciler {
         while !stack.is_empty() {
             let (path, current) = stack.pop().unwrap();
             match current {
-                ChecksumElement::Root(dir) | ChecksumElement::Directory(dir) => {
+                ChecksumElement::Directory(dir) => {
                     dir.iter().for_each(|(dir_name, element)| {
                         let mut new_path = path.clone();
                         new_path.push(dir_name);
@@ -122,8 +119,8 @@ mod tests {
     #[test]
     fn empty() {
         let prev = ChecksumTree::default();
-        let next = ChecksumTree::default();
-        let diff = Reconciler::reconcile(prev, &next);
+        let mut next = ChecksumTree::default();
+        let diff = Reconciler::reconcile(prev, &mut next);
 
         assert!(diff.is_empty());
     }
@@ -133,9 +130,9 @@ mod tests {
         let prev = ChecksumTree::default();
         let mut next = HashMap::new();
         next.insert("./file.txt".to_string(), "sha256hash".to_string());
-        let next: ChecksumTree = next.into();
+        let mut next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &next);
+        let diff = Reconciler::reconcile(prev, &mut next);
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -148,9 +145,9 @@ mod tests {
         let prev = ChecksumTree::default();
         let mut next = HashMap::new();
         next.insert("./direktory/file.txt".to_string(), "sha256hash".to_string());
-        let next: ChecksumTree = next.into();
+        let mut next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &next);
+        let diff = Reconciler::reconcile(prev, &mut next);
 
         assert!(diff.len() == 2);
         diff.into_iter()
@@ -169,9 +166,9 @@ mod tests {
             "./direktory/nested/file.txt".to_string(),
             "sha256hash".to_string(),
         );
-        let next: ChecksumTree = next.into();
+        let mut next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &next);
+        let diff = Reconciler::reconcile(prev, &mut next);
 
         assert!(diff.len() == 3);
         diff.into_iter()
@@ -190,9 +187,9 @@ mod tests {
         let prev: ChecksumTree = prev.into();
         let mut next = HashMap::new();
         next.insert("./file.txt".to_string(), "sha256hashThatsNew".to_string());
-        let next: ChecksumTree = next.into();
+        let mut next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &next);
+        let diff = Reconciler::reconcile(prev, &mut next);
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -210,9 +207,9 @@ mod tests {
             "./direktory/file.txt".to_string(),
             "sha256hashThatsNew".to_string(),
         );
-        let next: ChecksumTree = next.into();
+        let mut next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &next);
+        let diff = Reconciler::reconcile(prev, &mut next);
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -233,9 +230,9 @@ mod tests {
             "./direktory/nested/file.txt".to_string(),
             "sha256hashThatsNew".to_string(),
         );
-        let next: ChecksumTree = next.into();
+        let mut next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &next);
+        let diff = Reconciler::reconcile(prev, &mut next);
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -248,9 +245,9 @@ mod tests {
         let mut prev = HashMap::new();
         prev.insert("./file.txt".to_string(), "sha256hash".to_string());
         let prev: ChecksumTree = prev.into();
-        let next: ChecksumTree = ChecksumTree::default();
+        let mut next: ChecksumTree = ChecksumTree::default();
 
-        let diff = Reconciler::reconcile(prev, &next);
+        let diff = Reconciler::reconcile(prev, &mut next);
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -263,9 +260,9 @@ mod tests {
         let mut prev = HashMap::new();
         prev.insert("./direktory/file.txt".to_string(), "sha256hash".to_string());
         let prev: ChecksumTree = prev.into();
-        let next: ChecksumTree = ChecksumTree::default();
+        let mut next: ChecksumTree = ChecksumTree::default();
 
-        let diff = Reconciler::reconcile(prev, &next);
+        let diff = Reconciler::reconcile(prev, &mut next);
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -298,9 +295,9 @@ mod tests {
             "./direktory2/nested/file2.txt".to_string(),
             "sha256hashThatsNew".to_string(),
         );
-        let next: ChecksumTree = next.into();
+        let mut next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &next);
+        let diff = Reconciler::reconcile(prev, &mut next);
 
         assert!(diff.len() == 2);
         diff.into_iter()
