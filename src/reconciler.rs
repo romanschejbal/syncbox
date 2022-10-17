@@ -1,7 +1,7 @@
 use crate::checksum_tree::{ChecksumElement, ChecksumTree};
 use std::{collections::VecDeque, path::PathBuf};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Action {
     Mkdir(PathBuf),
     Put(PathBuf),
@@ -105,7 +105,7 @@ impl Reconciler {
                         stack.push((new_path, element));
                     });
                 }
-                ChecksumElement::File(_) => actions.push(Action::Remove(path.into())),
+                ChecksumElement::File(_) => actions.push(Action::Remove(path)),
             }
         }
 
@@ -270,6 +270,44 @@ mod tests {
         assert!(!diff.is_empty());
         diff.into_iter()
             .zip(vec![Action::Remove("./direktory/file.txt".into())])
+            .for_each(|(a, b)| assert_eq!(a, b));
+    }
+
+    #[test]
+    fn all_together() {
+        let mut prev = HashMap::new();
+        prev.insert(
+            "./direktory/file1.txt".to_string(),
+            "wontChange".to_string(),
+        );
+        prev.insert(
+            "./direktory2/nested/file2.txt".to_string(),
+            "sha256hash".to_string(),
+        );
+        prev.insert(
+            "./direktory2/other/file3.txt".to_string(),
+            "will-be-removed".to_string(),
+        );
+        let prev: ChecksumTree = prev.into();
+        let mut next = HashMap::new();
+        next.insert(
+            "./direktory/file1.txt".to_string(),
+            "wontChange".to_string(),
+        );
+        next.insert(
+            "./direktory2/nested/file2.txt".to_string(),
+            "sha256hashThatsNew".to_string(),
+        );
+        let next: ChecksumTree = next.into();
+
+        let diff = Reconciler::reconcile(prev, &next);
+
+        assert!(!diff.is_empty());
+        diff.into_iter()
+            .zip(vec![
+                Action::Put("./direktory2/nested/file2.txt".into()),
+                Action::Remove("./direktory2/other/file3.txt".into()),
+            ])
             .for_each(|(a, b)| assert_eq!(a, b));
     }
 }
