@@ -15,12 +15,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-      - name: Build
-        run: cargo build
       - name: Clippy
         run: cargo clippy -- -D warnings
       - name: Run tests
         run: cargo test
+      - name: Build
+        run: cargo build
       - name: Build release
         run: cargo build --release
       - name: Archive binaries
