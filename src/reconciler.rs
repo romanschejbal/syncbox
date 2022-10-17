@@ -105,7 +105,7 @@ impl Reconciler {
                         stack.push((new_path, element));
                     });
                 }
-                ChecksumElement::File(_) => actions.push(Action::Remove(path.into())),
+                ChecksumElement::File(_) => actions.push(Action::Remove(path)),
             }
         }
 
