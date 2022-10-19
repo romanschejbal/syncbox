@@ -187,7 +187,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         match action {
             Action::Put(path) => {
                 let buff = Cursor::new(fs::read(path).await?);
-                match transport.upload(path, Box::new(buff)).await {
+                match transport.write(path, Box::new(buff)).await {
                     Ok(b) => {
                         println!(
                             "      ✅ Copied {}/{} file: {:?} {} in {:.2?}s",
@@ -249,7 +249,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let json = serde_json::to_string_pretty(&next_checksum_tree)?;
 
     transport
-        .upload(
+        .write(
             Path::new(&args.checksum_file),
             Box::new(Cursor::new(json.as_bytes().to_owned())),
         )

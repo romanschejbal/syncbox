@@ -1,5 +1,4 @@
 use super::Transport;
-use crate::checksum_tree::ChecksumTree;
 use rand::Rng;
 use std::io::Read;
 use std::{error::Error, path::Path};
@@ -8,17 +7,10 @@ use tokio::fs;
 #[derive(Default)]
 pub struct LocalFilesystem {}
 
-#[async_trait::async_trait]
+#[async_trait::async_trait(?Send)]
 impl Transport for LocalFilesystem {
-    async fn get_last_checksum(
-        &mut self,
-        checksum_filepath: &Path,
-    ) -> Result<ChecksumTree, Box<dyn Error>> {
-        fs::read(checksum_filepath)
-            .await
-            .map(|content| serde_json::from_slice(&content))
-            .unwrap_or_else(|_| Ok(ChecksumTree::default()))
-            .map_err(|e| e.into())
+    async fn read(&mut self, filename: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
+        Ok(fs::read(filename).await?)
     }
 
     async fn mkdir(&mut self, _path: &Path) -> Result<(), Box<dyn Error>> {
@@ -27,7 +19,7 @@ impl Transport for LocalFilesystem {
         Ok(())
     }
 
-    async fn upload(
+    async fn write(
         &mut self,
         _filename: &Path,
         _destination: Box<dyn Read + Send>,

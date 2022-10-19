@@ -1,5 +1,4 @@
 use super::Transport;
-use crate::checksum_tree::ChecksumTree;
 use std::io::Read;
 use std::net::ToSocketAddrs;
 use std::{error::Error, path::Path};
@@ -9,7 +8,7 @@ use suppaftp::FtpStream;
 pub struct Connected;
 pub struct Disconnected;
 
-pub struct FTP<T = Disconnected> {
+pub struct Ftp<T = Disconnected> {
     host: String,
     user: String,
     pass: String,
@@ -18,24 +17,24 @@ pub struct FTP<T = Disconnected> {
     _data: std::marker::PhantomData<T>,
 }
 
-impl FTP<Disconnected> {
+impl Ftp<Disconnected> {
     pub fn new(
         host: impl AsRef<str>,
         user: impl AsRef<str>,
         pass: impl AsRef<str>,
         dir: impl AsRef<str>,
-    ) -> Result<Self, Box<dyn Error>> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             host: host.as_ref().to_string(),
             user: user.as_ref().to_string(),
             pass: pass.as_ref().to_string(),
             dir: dir.as_ref().to_string(),
             stream: None,
             _data: std::marker::PhantomData,
-        })
+        }
     }
 
-    pub async fn connect(self) -> Result<FTP<Connected>, Box<dyn Error>> {
+    pub async fn connect(self) -> Result<Ftp<Connected>, Box<dyn Error>> {
         let ip = &self
             .host
             .to_socket_addrs()?
@@ -48,7 +47,7 @@ impl FTP<Disconnected> {
         // )?;
         stream.login(&self.user, &self.pass)?;
         stream.cwd(&self.dir)?;
-        Ok(FTP {
+        Ok(Ftp {
             host: self.host,
             user: self.user,
             pass: self.pass,
@@ -59,23 +58,19 @@ impl FTP<Disconnected> {
     }
 }
 
-#[async_trait::async_trait]
-impl Transport for FTP<Connected> {
-    async fn get_last_checksum(
-        &mut self,
-        checksum_filepath: &Path,
-    ) -> Result<ChecksumTree, Box<dyn Error>> {
+#[async_trait::async_trait(?Send)]
+impl Transport for Ftp<Connected> {
+    async fn read(&mut self, filename: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
         Ok(self
             .stream
             .as_mut()
             .unwrap()
-            .retr_as_buffer(checksum_filepath.to_str().ok_or(format!(
-                "Failed converting Path to str: {checksum_filepath:?}"
-            ))?)
-            .ok()
-            .map(|bytes| serde_json::from_slice::<ChecksumTree>(&bytes.into_inner()))
-            .transpose()?
-            .unwrap_or_default())
+            .retr_as_buffer(
+                filename
+                    .to_str()
+                    .ok_or(format!("Failed converting Path to str: {filename:?}"))?,
+            )
+            .map(|cursor| cursor.into_inner())?)
     }
 
     async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn Error>> {
@@ -97,7 +92,7 @@ impl Transport for FTP<Connected> {
         }
     }
 
-    async fn upload(
+    async fn write(
         &mut self,
         filename: &Path,
         mut r: Box<dyn Read + Send>,

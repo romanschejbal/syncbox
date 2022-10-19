@@ -1,5 +1,5 @@
 use crate::checksum_tree::{ChecksumElement, ChecksumTree};
-use std::{collections::VecDeque, ops::DerefMut, path::PathBuf};
+use std::{collections::VecDeque, ops::Deref, path::PathBuf};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Action {
@@ -11,11 +11,11 @@ pub enum Action {
 pub struct Reconciler {}
 
 impl Reconciler {
-    pub fn reconcile(mut prev: ChecksumTree, next: &mut ChecksumTree) -> Vec<Action> {
+    pub fn reconcile(mut prev: ChecksumTree, next: &ChecksumTree) -> Vec<Action> {
         let mut previous_checksum = prev.get_root().take().unwrap();
         let mut actions = vec![];
-        let root = next.deref_mut().take().unwrap();
-        let mut to_reconcile = VecDeque::from([(vec![], &root)]);
+        let root = next.deref().as_ref().unwrap();
+        let mut to_reconcile = VecDeque::from([(vec![], root)]);
         while !to_reconcile.is_empty() {
             let (next_depth, next) = to_reconcile.pop_front().unwrap();
             match next {
