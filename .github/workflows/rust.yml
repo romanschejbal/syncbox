@@ -27,8 +27,6 @@ jobs:
         run: cargo clippy -- -D warnings
       - name: Run tests
         run: cargo test --target ${{ matrix.target }}
-      - name: Build
-        run: cargo build --target ${{ matrix.target }}
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
       - name: Archive binaries
@@ -36,4 +34,4 @@ jobs:
         with:
           name: Executables-${{ matrix.os }}
           path: |
-            target/*/syncbox
+            target/*/release/syncbox
