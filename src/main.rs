@@ -13,7 +13,7 @@ use std::{
 use syncbox::{
     checksum_tree::ChecksumTree,
     reconciler::{Action, Reconciler},
-    transport::{ftp::FTP, Transport},
+    transport::{ftp::Ftp, Transport},
 };
 use tokio::fs;
 
@@ -131,7 +131,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // reconcile
     println!("{} 🚚 Reconciling changes", style("[4/9]").dim().bold(),);
-    let todo = Reconciler::reconcile(previous_checksum_tree, &mut next_checksum_tree);
+    let todo = Reconciler::reconcile(previous_checksum_tree, &next_checksum_tree);
 
     if todo.is_empty() {
         println!("      🤷 Nothing to do");
