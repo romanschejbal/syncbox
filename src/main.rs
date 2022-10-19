@@ -119,7 +119,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Box::new(syncbox::transport::local::LocalFilesystem::default())
     } else {
         Box::new(
-            FTP::new(args.ftp_host, args.ftp_user, args.ftp_pass, args.ftp_dir)?
+            Ftp::new(args.ftp_host, args.ftp_user, args.ftp_pass, args.ftp_dir)
                 .connect()
                 .await?,
         )
