@@ -1,35 +1,52 @@
 use super::Transport;
-use rand::Rng;
-use std::io::Read;
-use std::{error::Error, path::Path};
-use tokio::fs;
+use std::{
+    error::Error,
+    path::{Path, PathBuf},
+    process::Command,
+};
+use tokio::{fs, io::AsyncRead};
 
-#[derive(Default)]
-pub struct LocalFilesystem {}
+pub struct LocalFilesystem {
+    dir: PathBuf,
+}
+
+impl Default for LocalFilesystem {
+    fn default() -> Self {
+        let dir =
+            String::from_utf8(Command::new("mktemp").arg("-d").output().unwrap().stdout).unwrap();
+        println!("Created temp dir: {dir}");
+        Self {
+            dir: dir.trim().into(),
+        }
+    }
+}
 
 #[async_trait::async_trait(?Send)]
 impl Transport for LocalFilesystem {
     async fn read(&mut self, filename: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
-        Ok(fs::read(filename).await?)
+        let mut path = self.dir.clone();
+        path.push(filename);
+        Ok(fs::read(path).await?)
     }
 
-    async fn mkdir(&mut self, _path: &Path) -> Result<(), Box<dyn Error>> {
-        let t = rand::thread_rng().gen_range(0.0..0.1);
-        tokio::time::sleep(std::time::Duration::from_secs_f64(t)).await;
+    async fn mkdir(&mut self, dir_path: &Path) -> Result<(), Box<dyn Error>> {
+        let mut path = self.dir.clone();
+        path.push(dir_path);
+        tokio::fs::create_dir(path).await?;
         Ok(())
     }
 
     async fn write(
         &mut self,
-        _filename: &Path,
-        _destination: Box<dyn Read + Send>,
+        filename: &Path,
+        source: Box<dyn AsyncRead>,
+        _progress_update_callback: Box<dyn Fn(u64)>,
     ) -> Result<u64, Box<dyn Error>> {
-        let t = rand::thread_rng().gen_range(0.0..0.2);
-        // if t > 0.1 {
-        //     return Err("timeout".into());
-        // }
-        tokio::time::sleep(std::time::Duration::from_secs_f64(t)).await;
-        Ok((t * 1024.0) as u64)
+        let mut dir = self.dir.clone();
+        dir.push(filename);
+        let mut file = tokio::fs::File::create(dir).await?;
+        let mut source = Box::into_pin(source);
+        Ok(tokio::io::copy(&mut source, &mut file).await?)
     }
 
     async fn remove(&mut self, _pathname: &Path) -> Result<(), Box<dyn Error>> {

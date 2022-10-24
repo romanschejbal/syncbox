@@ -2,6 +2,7 @@ use clap::Parser;
 use console::style;
 use core::panic;
 use futures::{stream, StreamExt};
+use indicatif::ProgressStyle;
 use std::{
     collections::HashMap,
     error::Error,
@@ -85,13 +86,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // build map with checksums
     println!("{} 🧬 Calculating checksums", style("[2/9]").dim().bold());
     let pb = &indicatif::ProgressBar::new(files.len().try_into()?);
+    pb.set_style(
+        ProgressStyle::with_template(
+            "         [{elapsed_precise}] {bar:50.cyan/blue} {pos:>7}/{len:7} {wide_msg}",
+        )
+        .unwrap()
+        .progress_chars("#>-"),
+    );
     let next_checksum_tree: ChecksumTree = stream::iter(files)
-        .then(|filepath| async move {
+        .map(|filepath| async move {
+            pb.set_message(filepath.clone());
             let checksum = sha256::digest_file(&filepath)
                 .map_err(|e| format!("Failed checksum of {filepath:?} with error {e:?}"))?;
             pb.inc(1);
             Ok((filepath, checksum)) as Result<_, Box<dyn Error>>
         })
+        .buffer_unordered(num_cpus::get())
         .collect::<Vec<_>>()
         .await
         .into_iter()
@@ -165,7 +175,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     n.elapsed().as_secs_f64(),
                 ),
                 Err(error) => {
-                    eprintln!("      ❌ Error while copying {:?}: {}", path, error);
+                    eprintln!(
+                        "      ❌ Error while creating directory {:?}: {}",
+                        path, error
+                    );
                     next_checksum_tree.lock().unwrap().remove_at(path);
                     has_error = true;
                 }
@@ -186,9 +199,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         match action {
             Action::Put(path) => {
-                let buff = Cursor::new(fs::read(path).await?);
-                match transport.write(path, Box::new(buff)).await {
+                let file = fs::File::open(path).await?;
+                let pb = Arc::new(indicatif::ProgressBar::new(file.metadata().await?.len()));
+                pb.set_style(
+                    ProgressStyle::with_template(
+                        "         [{elapsed_precise}] {wide_bar:.cyan/blue} {bytes}/{total_bytes} [{bytes_per_sec}] {msg}",
+                    )
+                    .unwrap()
+                    .progress_chars("#>-"),
+                );
+                let pb_inner = Arc::clone(&pb);
+                match transport
+                    .write(
+                        path,
+                        Box::new(file),
+                        Box::new(move |uploaded| {
+                            pb_inner.inc(uploaded);
+                        }),
+                    )
+                    .await
+                {
                     Ok(b) => {
+                        pb.finish_and_clear();
                         println!(
                             "      ✅ Copied {}/{} file: {:?} {} in {:.2?}s",
                             i + 1,
@@ -251,7 +283,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     transport
         .write(
             Path::new(&args.checksum_file),
-            Box::new(Cursor::new(json.as_bytes().to_owned())),
+            Box::new(Cursor::new(json.as_bytes().to_vec())),
+            Box::new(|_| {}),
         )
         .await?;
 

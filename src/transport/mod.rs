@@ -1,5 +1,6 @@
 use crate::checksum_tree::ChecksumTree;
-use std::{error::Error, io::Read, path::Path};
+use std::{error::Error, path::Path};
+use tokio::io::AsyncRead;
 
 pub mod ftp;
 pub mod local;
@@ -26,7 +27,8 @@ pub trait Transport {
     async fn write(
         &mut self,
         filename: &Path,
-        read: Box<dyn Read + Send>,
+        read: Box<dyn AsyncRead>,
+        progress_update_callback: Box<dyn Fn(u64)>,
     ) -> Result<u64, Box<dyn Error>>;
 
     async fn remove(&mut self, pathname: &Path) -> Result<(), Box<dyn Error>>;

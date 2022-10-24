@@ -1,9 +1,14 @@
 use super::Transport;
-use std::io::Read;
+use futures::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use std::io::ErrorKind;
 use std::net::ToSocketAddrs;
+use std::pin::Pin;
 use std::{error::Error, path::Path};
+use suppaftp::async_native_tls::TlsConnector;
 use suppaftp::FtpError;
 use suppaftp::FtpStream;
+use tokio::io::AsyncRead;
+use tokio_util::compat::TokioAsyncReadCompatExt;
 
 pub struct Connected;
 pub struct Disconnected;
@@ -39,14 +44,20 @@ impl Ftp<Disconnected> {
             .host
             .to_socket_addrs()?
             .find(|addr| addr.is_ipv4())
-            .ok_or("Could not resolve host")?;
-        let mut stream = FtpStream::connect(ip)?;
-        // .into_secure(
-        //     TlsConnector::new()?.into(),
-        //     "dev.dklab.cz.uvds648.active24.cz",
-        // )?;
-        stream.login(&self.user, &self.pass)?;
-        stream.cwd(&self.dir)?;
+            .ok_or("could not resolve host")?;
+        // let domain = self.host.split(':').next().expect("Domain not valid");
+        let mut stream = FtpStream::connect(ip).await?;
+        // stream = stream
+        //     .into_secure(
+        //         TlsConnector::new()
+        //             .danger_accept_invalid_certs(true)
+        //             .danger_accept_invalid_hostnames(true)
+        //             .into(),
+        //         domain,
+        //     )
+        //     .await?;
+        stream.login(&self.user, &self.pass).await?;
+        stream.cwd(&self.dir).await?;
         Ok(Ftp {
             host: self.host,
             user: self.user,
@@ -61,16 +72,24 @@ impl Ftp<Disconnected> {
 #[async_trait::async_trait(?Send)]
 impl Transport for Ftp<Connected> {
     async fn read(&mut self, filename: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
-        Ok(self
+        let mut buf = vec![];
+        let mut stream = self
             .stream
             .as_mut()
             .unwrap()
-            .retr_as_buffer(
+            .retr_as_stream(
                 filename
                     .to_str()
-                    .ok_or(format!("Failed converting Path to str: {filename:?}"))?,
+                    .ok_or(format!("failed converting Path to str: {filename:?}"))?,
             )
-            .map(|cursor| cursor.into_inner())?)
+            .await?;
+        stream.read_to_end(&mut buf).await?;
+        self.stream
+            .as_mut()
+            .unwrap()
+            .finalize_retr_stream(stream)
+            .await?;
+        Ok(buf)
     }
 
     async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn Error>> {
@@ -78,8 +97,9 @@ impl Transport for Ftp<Connected> {
             .stream
             .as_mut()
             .unwrap()
-            .mkdir(path.to_str().ok_or("Fail converting path to str")?)
-            .map_err(|e| Box::<dyn Error>::from(format!("Mkdir failed with error: {e}")))
+            .mkdir(path.to_str().ok_or("fail converting path to str")?)
+            .await
+            .map_err(|e| Box::<dyn Error>::from(format!("mkdir failed with error: {e}")))
         {
             Err(e) => {
                 if e.to_string().contains("File exists") {
@@ -95,26 +115,71 @@ impl Transport for Ftp<Connected> {
     async fn write(
         &mut self,
         filename: &Path,
-        mut r: Box<dyn Read + Send>,
+        reader: Box<dyn AsyncRead>,
+        update_progress_callback: Box<dyn Fn(u64)>,
     ) -> Result<u64, Box<dyn Error>> {
+        let writer = self
+            .stream
+            .as_mut()
+            .unwrap()
+            .put_with_stream(
+                filename
+                    .to_str()
+                    .ok_or(format!("failed converting Path to str: {filename:?}"))
+                    .map_err(FtpError::SecureError)?,
+            )
+            .await?;
+
+        let reader = Box::into_pin(reader);
+        let reader = Box::pin(TokioAsyncReadCompatExt::compat(reader));
+
+        async fn write_inner(
+            mut reader: Pin<Box<dyn futures::AsyncRead>>,
+            writer: &mut Pin<Box<impl AsyncWrite>>,
+            update_progress_callback: Box<dyn Fn(u64)>,
+        ) -> Result<u64, Box<dyn Error>> {
+            let mut buf = [0; 8 * 1024];
+            let mut len = 0;
+
+            loop {
+                match reader.read(&mut buf).await {
+                    Ok(0) => {
+                        break;
+                    }
+                    Ok(n) => {
+                        len += n;
+                        writer.write_all(&buf[..n]).await?;
+                        writer.flush().await?;
+                        update_progress_callback(n as u64);
+                    }
+                    Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                    Err(e) => {
+                        return Err(e.into());
+                    }
+                };
+            }
+            Ok(len as u64)
+        }
+
+        let mut writer = Box::pin(writer);
+        let result = write_inner(reader, &mut writer, update_progress_callback).await;
         self.stream
             .as_mut()
             .unwrap()
-            .put_file(
-                filename
-                    .to_str()
-                    .ok_or(format!("Failed converting Path to str: {filename:?}"))
-                    .map_err(FtpError::SecureError)?,
-                &mut r,
-            )
-            .map_err(|e| e.into())
+            .finalize_put_stream(writer)
+            .await?;
+        result
     }
 
     async fn remove(&mut self, mut pathname: &Path) -> Result<(), Box<dyn Error>> {
-        self.stream.as_mut().unwrap().rm(pathname
-            .to_str()
-            .ok_or(format!("Failed converting Path to str: {pathname:?}"))
-            .map_err(FtpError::SecureError)?)?;
+        self.stream
+            .as_mut()
+            .unwrap()
+            .rm(pathname
+                .to_str()
+                .ok_or(format!("failed converting Path to str: {pathname:?}"))
+                .map_err(FtpError::SecureError)?)
+            .await?;
 
         while let Some(parent_pathname) = pathname.parent() {
             if self
@@ -124,9 +189,10 @@ impl Transport for Ftp<Connected> {
                 .rmdir(
                     parent_pathname
                         .to_str()
-                        .ok_or(format!("Failed converting Path to str: {pathname:?}"))
+                        .ok_or(format!("failed converting Path to str: {pathname:?}"))
                         .map_err(FtpError::SecureError)?,
                 )
+                .await
                 .ok()
                 .is_none()
             {
@@ -140,6 +206,6 @@ impl Transport for Ftp<Connected> {
     }
 
     async fn close(mut self: Box<Self>) -> Result<(), Box<dyn Error>> {
-        self.stream.as_mut().unwrap().quit().map_err(|e| e.into())
+        Ok(self.stream.as_mut().unwrap().quit().await?)
     }
 }
