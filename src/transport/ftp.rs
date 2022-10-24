@@ -4,7 +4,6 @@ use std::io::ErrorKind;
 use std::net::ToSocketAddrs;
 use std::pin::Pin;
 use std::{error::Error, path::Path};
-use suppaftp::async_native_tls::TlsConnector;
 use suppaftp::FtpError;
 use suppaftp::FtpStream;
 use tokio::io::AsyncRead;

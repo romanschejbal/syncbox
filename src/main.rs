@@ -208,6 +208,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     .unwrap()
                     .progress_chars("#>-"),
                 );
+                let msg = path.to_path_buf().to_str().unwrap().to_string();
+                pb.set_message(msg);
                 let pb_inner = Arc::clone(&pb);
                 match transport
                     .write(
