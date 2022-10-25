@@ -4,6 +4,8 @@ use std::io::ErrorKind;
 use std::net::ToSocketAddrs;
 use std::pin::Pin;
 use std::{error::Error, path::Path};
+use suppaftp::async_native_tls::TlsConnector;
+use suppaftp::types::FileType;
 use suppaftp::FtpError;
 use suppaftp::FtpStream;
 use tokio::io::AsyncRead;
@@ -38,23 +40,25 @@ impl Ftp<Disconnected> {
         }
     }
 
-    pub async fn connect(self) -> Result<Ftp<Connected>, Box<dyn Error>> {
+    pub async fn connect(self, use_tls: bool) -> Result<Ftp<Connected>, Box<dyn Error>> {
         let ip = &self
             .host
             .to_socket_addrs()?
             .find(|addr| addr.is_ipv4())
             .ok_or("could not resolve host")?;
-        // let domain = self.host.split(':').next().expect("Domain not valid");
+        let domain = self.host.split(':').next().expect("Domain not valid");
         let mut stream = FtpStream::connect(ip).await?;
-        // stream = stream
-        //     .into_secure(
-        //         TlsConnector::new()
-        //             .danger_accept_invalid_certs(true)
-        //             .danger_accept_invalid_hostnames(true)
-        //             .into(),
-        //         domain,
-        //     )
-        //     .await?;
+        if use_tls {
+            stream = stream
+                .into_secure(
+                    TlsConnector::new()
+                        .danger_accept_invalid_certs(true)
+                        .danger_accept_invalid_hostnames(true)
+                        .into(),
+                    domain,
+                )
+                .await?;
+        }
         stream.login(&self.user, &self.pass).await?;
         stream.cwd(&self.dir).await?;
         Ok(Ftp {
@@ -72,6 +76,11 @@ impl Ftp<Disconnected> {
 impl Transport for Ftp<Connected> {
     async fn read(&mut self, filename: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
         let mut buf = vec![];
+        self.stream
+            .as_mut()
+            .unwrap()
+            .transfer_type(FileType::Binary)
+            .await?;
         let mut stream = self
             .stream
             .as_mut()
@@ -117,6 +126,11 @@ impl Transport for Ftp<Connected> {
         reader: Box<dyn AsyncRead>,
         update_progress_callback: Box<dyn Fn(u64)>,
     ) -> Result<u64, Box<dyn Error>> {
+        self.stream
+            .as_mut()
+            .unwrap()
+            .transfer_type(FileType::Binary)
+            .await?;
         let writer = self
             .stream
             .as_mut()

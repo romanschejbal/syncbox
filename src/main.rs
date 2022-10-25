@@ -51,6 +51,8 @@ struct Args {
     ftp_pass: String,
     #[arg(long)]
     ftp_dir: String,
+    #[arg(long, default_value_t = false)]
+    use_tls: bool,
 
     #[arg(
         long,
@@ -62,6 +64,8 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    env_logger::init();
+
     let args = Args::parse();
     let now = std::time::Instant::now();
 
@@ -130,7 +134,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     } else {
         Box::new(
             Ftp::new(args.ftp_host, args.ftp_user, args.ftp_pass, args.ftp_dir)
-                .connect()
+                .connect(args.use_tls)
                 .await?,
         )
     };
