@@ -1,4 +1,5 @@
 use crate::checksum_tree::{ChecksumElement, ChecksumTree};
+use std::error::Error;
 use std::{collections::VecDeque, ops::Deref, path::PathBuf};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -11,7 +12,11 @@ pub enum Action {
 pub struct Reconciler {}
 
 impl Reconciler {
-    pub fn reconcile(mut prev: ChecksumTree, next: &ChecksumTree) -> Vec<Action> {
+    pub fn reconcile(
+        mut prev: ChecksumTree,
+        next: &ChecksumTree,
+    ) -> Result<Vec<Action>, Box<dyn Error>> {
+        check_version(prev.get_version(), next.get_version())?;
         let mut previous_checksum = prev.get_root().take().unwrap();
         let mut actions = vec![];
         let root = next.deref().as_ref().unwrap();
@@ -100,8 +105,19 @@ impl Reconciler {
             }
         }
 
-        actions
+        Ok(actions)
     }
+}
+
+/// Panics if previous version is newer
+fn check_version(prev: &str, next: &str) -> Result<(), Box<dyn Error>> {
+    if next < prev {
+        return Err(format!(
+            "Your version of syncbox seems outdated, please update to at least {prev}"
+        )
+        .into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -114,7 +130,7 @@ mod tests {
     fn empty() {
         let prev = ChecksumTree::default();
         let mut next = ChecksumTree::default();
-        let diff = Reconciler::reconcile(prev, &mut next);
+        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
 
         assert!(diff.is_empty());
     }
@@ -126,7 +142,7 @@ mod tests {
         next.insert("./file.txt".to_string(), "sha256hash".to_string());
         let mut next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &mut next);
+        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -141,7 +157,7 @@ mod tests {
         next.insert("./direktory/file.txt".to_string(), "sha256hash".to_string());
         let mut next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &mut next);
+        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
 
         assert!(diff.len() == 2);
         diff.into_iter()
@@ -162,7 +178,7 @@ mod tests {
         );
         let mut next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &mut next);
+        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
 
         assert!(diff.len() == 3);
         diff.into_iter()
@@ -183,7 +199,7 @@ mod tests {
         next.insert("./file.txt".to_string(), "sha256hashThatsNew".to_string());
         let mut next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &mut next);
+        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -203,7 +219,7 @@ mod tests {
         );
         let mut next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &mut next);
+        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -226,7 +242,7 @@ mod tests {
         );
         let mut next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &mut next);
+        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -241,7 +257,7 @@ mod tests {
         let prev: ChecksumTree = prev.into();
         let mut next: ChecksumTree = ChecksumTree::default();
 
-        let diff = Reconciler::reconcile(prev, &mut next);
+        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -256,7 +272,7 @@ mod tests {
         let prev: ChecksumTree = prev.into();
         let mut next: ChecksumTree = ChecksumTree::default();
 
-        let diff = Reconciler::reconcile(prev, &mut next);
+        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -291,7 +307,7 @@ mod tests {
         );
         let mut next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &mut next);
+        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
 
         assert!(diff.len() == 2);
         diff.into_iter()
@@ -300,5 +316,28 @@ mod tests {
                 Action::Remove("./direktory2/other/file3.txt".into()),
             ])
             .for_each(|(a, b)| assert_eq!(a, b));
+    }
+
+    #[test]
+    fn version_equal_ok() {
+        assert_eq!(check_version("0.1.0", "0.1.1").unwrap(), ());
+    }
+
+    #[test]
+    fn version_older_ok() {
+        assert_eq!(check_version("0.1.2", "0.1.3").unwrap(), ());
+        assert_eq!(check_version("0.1.2", "1.1.3").unwrap(), ());
+        assert_eq!(check_version("10.1.2", "10.10.3").unwrap(), ());
+    }
+
+    #[test]
+    fn version_newer_not_ok() {
+        assert_eq!(
+            check_version("0.1.2", "0.1.1").map_err(|e| e.to_string()),
+            Err(
+                "Your version of syncbox seems outdated, please update to at least 0.1.2"
+                    .to_string()
+            )
+        );
     }
 }

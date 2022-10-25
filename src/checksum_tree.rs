@@ -21,18 +21,25 @@ impl Default for ChecksumElement {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ChecksumTree {
+    #[serde(default)]
+    version: String,
     root: Option<ChecksumElement>,
 }
 
 impl ChecksumTree {
     fn new() -> Self {
         Self {
+            version: env!("CARGO_PKG_VERSION").into(),
             root: Some(ChecksumElement::default()),
         }
     }
 
     pub fn get_root(&mut self) -> &mut Option<ChecksumElement> {
         &mut self.root
+    }
+
+    pub fn get_version(&self) -> &str {
+        &self.version
     }
 
     /// Used for when there was error uploading files
@@ -133,6 +140,7 @@ impl From<HashMap<String, String>> for ChecksumTree {
 
         Self {
             root: Some(stack.pop().unwrap()),
+            ..Default::default()
         }
     }
 }

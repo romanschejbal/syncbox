@@ -20,11 +20,7 @@ use tokio::fs;
 
 /// Syncbox like dropbox, but with arbitrary tranfer protocol
 #[derive(Parser, Debug)]
-#[command(
-    name = "Syncbox",
-    version = "0.1.0",
-    about = "Fast sync with remote filesystem"
-)]
+#[command(version, about = "Fast sync with remote filesystem")]
 struct Args {
     #[arg(help = "Directory to diff against", default_value = ".")]
     directory: String,
@@ -145,7 +141,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // reconcile
     println!("{} 🚚 Reconciling changes", style("[4/9]").dim().bold(),);
-    let todo = Reconciler::reconcile(previous_checksum_tree, &next_checksum_tree);
+    let todo = Reconciler::reconcile(previous_checksum_tree, &next_checksum_tree)?;
 
     if todo.is_empty() {
         println!("      🤷 Nothing to do");

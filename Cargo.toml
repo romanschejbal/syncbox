@@ -4,8 +4,6 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Roman Schejbal <schejbalroman@gmail.com>"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 async-trait = "0.1.57"
 clap = { version = "4.0.14", features = ["derive"] }
