@@ -34,4 +34,4 @@ jobs:
         with:
           name: Executables-${{ matrix.os }}
           path: |
-            target/*/release/syncbox
+            target/${{ matrix.target }}/release/syncbox
