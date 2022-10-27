@@ -18,7 +18,7 @@ use syncbox::{
 };
 use tokio::fs;
 
-const PROGRESS_BAR_CHARS: &'static str = "=»-";
+const PROGRESS_BAR_CHARS: &str = "=»-";
 
 /// Syncbox like dropbox, but with arbitrary tranfer protocol
 #[derive(Parser, Debug)]
