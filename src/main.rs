@@ -18,6 +18,8 @@ use syncbox::{
 };
 use tokio::fs;
 
+const PROGRESS_BAR_CHARS: &'static str = "=»-";
+
 /// Syncbox like dropbox, but with arbitrary tranfer protocol
 #[derive(Parser, Debug)]
 #[command(version, about = "Fast sync with remote filesystem")]
@@ -91,7 +93,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             "         [{elapsed_precise}] {bar:50.cyan/blue} {pos:>7}/{len:7} {wide_msg}",
         )
         .unwrap()
-        .progress_chars("#>-"),
+        .progress_chars(PROGRESS_BAR_CHARS),
     );
     let next_checksum_tree: ChecksumTree = stream::iter(files)
         .map(|filepath| async move {
@@ -206,7 +208,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         "         [{elapsed_precise}] {wide_bar:.cyan/blue} {bytes}/{total_bytes} [{bytes_per_sec}] {msg}",
                     )
                     .unwrap()
-                    .progress_chars("#>-"),
+                    .progress_chars(PROGRESS_BAR_CHARS),
                 );
                 let msg = path.to_path_buf().to_str().unwrap().to_string();
                 pb.set_message(msg);
