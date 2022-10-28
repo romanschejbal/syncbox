@@ -71,11 +71,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     println!("{} 🔍 Resolving files", style("[1/9]").dim().bold());
 
-    let mut ignored_files = vec![OsString::from(".git")];
+    let mut ignored_files = vec![OsString::from(".git"), OsString::from(".syncboxignore")];
     ignored_files.push((&args.checksum_file).into());
     let walker = ignore::WalkBuilder::new("./")
         .hidden(false)
         .filter_entry(move |entry| !ignored_files.contains(&entry.file_name().to_os_string()))
+        .add_custom_ignore_filename(".syncboxignore")
         .build();
     let files = walker
         .into_iter()
