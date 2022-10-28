@@ -3,6 +3,6 @@
 ## Install
 
 ```
-brew tap romanschejbal/syncbox https://github.com/romanschejbal/syncbox
+brew tap romanschejbal/tap
 brew install syncbox
 ```
