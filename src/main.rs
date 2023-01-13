@@ -8,7 +8,7 @@ use std::{
     error::Error,
     ffi::OsString,
     io::Cursor,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
 };
 use syncbox::{
@@ -21,7 +21,7 @@ use tokio::fs;
 const PROGRESS_BAR_CHARS: &str = "=»-";
 
 /// Syncbox like dropbox, but with arbitrary tranfer protocol
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(version, about = "Fast sync with remote filesystem")]
 struct Args {
     #[arg(help = "Directory to diff against", default_value = ".")]
@@ -58,6 +58,13 @@ struct Args {
         default_value_t = false
     )]
     dry_run: bool,
+
+    #[arg(
+        long,
+        help = "Ignore corrupted checksum file and override",
+        default_value_t = false
+    )]
+    force: bool,
 }
 
 #[tokio::main]
@@ -67,7 +74,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     let now = std::time::Instant::now();
 
-    std::env::set_current_dir(args.directory)?;
+    std::env::set_current_dir(args.directory.clone())?;
 
     println!("{} 🔍 Resolving files", style("[1/9]").dim().bold());
 
@@ -99,7 +106,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let next_checksum_tree: ChecksumTree = stream::iter(files)
         .map(|filepath| async move {
             pb.set_message(filepath.clone());
-            let checksum = sha256::digest_file(&filepath)
+            let path_buf = PathBuf::from(filepath.clone());
+            let checksum = sha256::try_digest(path_buf.as_path())
                 .map_err(|e| format!("Failed checksum of {filepath:?} with error {e:?}"))?;
             pb.inc(1);
             Ok((filepath, checksum)) as Result<_, Box<dyn Error>>
@@ -128,19 +136,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
         style("[3/9]").dim().bold(),
     );
 
-    let mut transport: Box<dyn Transport> = if args.dry_run {
-        Box::new(syncbox::transport::local::LocalFilesystem::default())
-    } else {
-        Box::new(
-            Ftp::new(args.ftp_host, args.ftp_user, args.ftp_pass, args.ftp_dir)
-                .connect(args.use_tls)
-                .await?,
-        )
-    };
+    let mut transport = make_transport(&args).await?;
 
-    let previous_checksum_tree = transport
+    let previous_checksum_tree = match transport
         .get_last_checksum(Path::new(&args.checksum_file))
-        .await?;
+        .await
+    {
+        Ok(checksum) => checksum,
+        Err(e) => {
+            if args.force {
+                ChecksumTree::default()
+            } else {
+                panic!("{e}");
+            }
+        }
+    };
 
     // reconcile
     println!("{} 🚚 Reconciling changes", style("[4/9]").dim().bold(),);
@@ -161,7 +171,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut has_error = false;
 
     // first create directories
-    println!("{} 📂 Creating directories", style("[6/9]").dim().bold(),);
+    println!("{} 📂 Creating directories", style("[6/9]").dim().bold());
     let create_directory_actions: Vec<_> = todo
         .iter()
         .filter(|action| matches!(action, Action::Mkdir(_)))
@@ -192,7 +202,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // upload files
     let mut bytes = 0;
-    println!("{} 🏂 Uploading files", style("[7/9]").dim().bold(),);
+    println!("{} 🏂 Uploading files", style("[7/9]").dim().bold());
     let put_actions: Vec<_> = todo
         .iter()
         .filter(|action| matches!(action, Action::Put(_)))
@@ -248,7 +258,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // removing files
-    println!("{} 🧻 Removing files", style("[8/9]").dim().bold(),);
+    println!("{} 🧻 Removing files", style("[8/9]").dim().bold());
     let remove_actions: Vec<_> = todo
         .iter()
         .filter(|action| matches!(action, Action::Remove(_)))
@@ -278,20 +288,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
         };
     }
 
-    println!("{} 🏁 Uploading checksum", style("[9/9]").dim().bold(),);
+    println!("{} 🏁 Uploading checksum", style("[9/9]").dim().bold());
     // save checksum
     let next_checksum_tree = Arc::try_unwrap(next_checksum_tree)
         .map_err(|_| <&str as Into<Box<dyn Error>>>::into("Failed to update checksums"))?
         .into_inner()?;
     let json = serde_json::to_string_pretty(&next_checksum_tree)?;
 
-    transport
+    let mut new_transport = make_transport(&args).await?;
+    new_transport
         .write(
             Path::new(&args.checksum_file),
             Box::new(Cursor::new(json.as_bytes().to_vec())),
             Box::new(|_| {}),
         )
         .await?;
+    new_transport.close().await?;
 
     transport.close().await?;
 
@@ -306,6 +318,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+async fn make_transport(args: &Args) -> Result<Box<dyn Transport>, Box<dyn Error>> {
+    Ok(if args.dry_run {
+        Box::<syncbox::transport::local::LocalFilesystem>::default()
+    } else {
+        Box::new(
+            Ftp::new(
+                args.ftp_host.clone(),
+                args.ftp_user.clone(),
+                args.ftp_pass.clone(),
+                args.ftp_dir.clone(),
+            )
+            .connect(args.use_tls)
+            .await?,
+        )
+    })
 }
 
 trait HumanBytes {
