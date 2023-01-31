@@ -73,9 +73,7 @@ impl ChecksumTree {
         }
 
         assert!(stack.len() == 1);
-        let mut hashmap: HashMap<String, ChecksumElement> = Default::default();
-        hashmap.insert(".".to_string(), stack.pop().unwrap());
-        self.root = Some(ChecksumElement::Directory(hashmap));
+        self.root = Some(stack.pop().unwrap());
     }
 }
 
@@ -155,5 +153,44 @@ impl Deref for ChecksumTree {
 impl DerefMut for ChecksumTree {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.root
+    }
+}
+
+#[cfg(test)]
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remove_at() {
+        let mut checksum: ChecksumTree = serde_json::from_str(
+            r#"{
+           "version": "0.3.0",
+           "root": {
+             "d": {
+               ".": {
+                 "d": {
+                   "DSC05947.ARW": {
+                     "f": "a4849b4f83f996ef9ce68b9f8561db4a991ab5f9dce3c52a45267c8e274bb73a"
+                   },
+                   "DSC06087.ARW": {
+                     "f": "aed5627230975590635e2f4809b6aa1f8ccc7f536fa97e08c76824ba093fbca3"
+                   },
+                   "DSC05953.ARW": {
+                     "f": "3e90e6673d78a1b12f51f417c4bfb555b5040557bef249a44faadc336273a55e"
+                   }
+                 }
+               }
+             }
+           }
+        }"#,
+        )
+        .unwrap();
+        checksum.remove_at(Path::new("./DSC06087.ARW"));
+        checksum.remove_at(Path::new("./DSC05953.ARW"));
+        assert_eq!(
+            serde_json::to_string(&checksum).unwrap(),
+            r#"{"version":"0.3.0","root":{"d":{".":{"d":{"DSC05947.ARW":{"f":"a4849b4f83f996ef9ce68b9f8561db4a991ab5f9dce3c52a45267c8e274bb73a"}}}}}}"#
+        );
     }
 }

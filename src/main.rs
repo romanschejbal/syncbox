@@ -237,9 +237,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     Ok(b) => {
                         pb.finish_and_clear();
                         println!(
-                            "      ✅ Copied {}/{} file: {:?} {} in {:.2?}s",
+                            "      ✅ Copied {}/{} [{:.1}%] file: {:?} {} in {:.2?}s",
                             i + 1,
                             put_actions.len(),
+                            (i + 1) as f64 / put_actions.len() as f64 * 100.0,
                             path,
                             b.to_human_size(),
                             n.elapsed().as_secs_f64(),
