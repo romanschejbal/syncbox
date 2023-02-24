@@ -1,7 +1,7 @@
 use clap::Parser;
 use console::style;
 use core::panic;
-use futures::{stream, StreamExt};
+use futures::{future::try_join_all, stream, StreamExt};
 use indicatif::ProgressStyle;
 use std::{
     collections::HashMap,
@@ -9,7 +9,10 @@ use std::{
     ffi::OsString,
     io::Cursor,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, AtomicU64},
+        Arc, Mutex,
+    },
 };
 use syncbox::{
     checksum_tree::ChecksumTree,
@@ -65,6 +68,9 @@ struct Args {
         default_value_t = false
     )]
     force: bool,
+
+    #[arg(long, help = "Concurrency limit", default_value_t = 1)]
+    concurrency: usize,
 }
 
 #[tokio::main]
@@ -166,9 +172,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         style("[5/9]").dim().bold(),
         style(todo.len()).bold()
     );
-    let next_checksum_tree = Arc::new(Mutex::new(next_checksum_tree));
 
-    let mut has_error = false;
+    let has_error = &AtomicBool::new(false);
 
     // first create directories
     println!("{} 📂 Creating directories", style("[6/9]").dim().bold());
@@ -189,11 +194,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 ),
                 Err(error) => {
                     eprintln!(
-                        "      ❌ Error while creating directory {:?}: {}",
-                        path, error
+                        "      ❌ Error while creating directory {}/{} {:?}: {}",
+                        i + 1,
+                        create_directory_actions.len(),
+                        path,
+                        error
                     );
-                    next_checksum_tree.lock().unwrap().remove_at(path);
-                    has_error = true;
+                    has_error.store(true, std::sync::atomic::Ordering::SeqCst);
                 }
             },
             _ => unreachable!(),
@@ -201,62 +208,88 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     // upload files
-    let mut bytes = 0;
     println!("{} 🏂 Uploading files", style("[7/9]").dim().bold());
-    let put_actions: Vec<_> = todo
+    let bytes = &AtomicU64::new(0);
+    let progress_bars = &indicatif::MultiProgress::new();
+    let next_checksum_tree = &Mutex::new(next_checksum_tree);
+    let transports = &Mutex::new(
+        try_join_all(
+            (0..args.concurrency)
+                .into_iter()
+                .map(|_| make_transport(&args)),
+        )
+        .await?,
+    );
+    let put_actions = todo
         .iter()
         .filter(|action| matches!(action, Action::Put(_)))
-        .collect();
-    for (i, action) in put_actions.iter().enumerate() {
-        let n = std::time::Instant::now();
+        .collect::<Vec<_>>();
+    let put_actions_len = put_actions.len();
+    let put_actions = put_actions.iter()
+        .enumerate()
+        .map(|(i, action)| async move {
+            let mut transport = transports.lock().unwrap().pop().unwrap();
 
-        match action {
-            Action::Put(path) => {
-                let file = fs::File::open(path).await?;
-                let pb = Arc::new(indicatif::ProgressBar::new(file.metadata().await?.len()));
-                pb.set_style(
-                    ProgressStyle::with_template(
-                        "         [{elapsed_precise}] {wide_bar:.cyan/blue} {bytes}/{total_bytes} [{bytes_per_sec}] {msg}",
-                    )
-                    .unwrap()
-                    .progress_chars(PROGRESS_BAR_CHARS),
-                );
-                let msg = path.to_path_buf().to_str().unwrap().to_string();
-                pb.set_message(msg);
-                let pb_inner = Arc::clone(&pb);
-                match transport
-                    .write(
-                        path,
-                        Box::new(file),
-                        Box::new(move |uploaded| {
-                            pb_inner.inc(uploaded);
-                        }),
-                    )
-                    .await
-                {
-                    Ok(b) => {
-                        pb.finish_and_clear();
+            let n = std::time::Instant::now();
+
+            let Action::Put(path) = action else {
+                unreachable!();
+            };
+
+            let file = fs::File::open(&path).await.unwrap();
+            let pb = indicatif::ProgressBar::new(file.metadata().await.unwrap().len());
+            let pb = Arc::new(progress_bars.add(pb));
+            let mut template = format!("         [{}/{}] ", i + 1, put_actions_len);
+            template.push_str("[{elapsed_precise}] {wide_bar:.cyan/blue} {bytes}/{total_bytes} [{bytes_per_sec}] {msg}");
+            pb.set_style(
+                ProgressStyle::with_template(&template)
+                .unwrap()
+                .progress_chars(PROGRESS_BAR_CHARS),
+            );
+            let msg = path.to_path_buf().to_str().unwrap().to_string();
+            pb.set_message(msg);
+            pb.inc(0);
+            let pb_inner = Arc::clone(&pb);
+            match transport
+                .write(
+                    path,
+                    Box::new(file),
+                    Box::new(move |uploaded| {
+                        pb_inner.inc(uploaded);
+                    }),
+                )
+                .await
+            {
+                Ok(b) => {
+                    pb.finish_and_clear();
+                    progress_bars.remove(&pb);
+                    if args.concurrency == 1 {
                         println!(
-                            "      ✅ Copied {}/{} [{:.1}%] file: {:?} {} in {:.2?}s",
+                            "      ✅ Copied {}/{} file: {:?} {} in {:.2?}s",
                             i + 1,
-                            put_actions.len(),
-                            (i + 1) as f64 / put_actions.len() as f64 * 100.0,
+                            put_actions_len,
                             path,
                             b.to_human_size(),
                             n.elapsed().as_secs_f64(),
                         );
-                        bytes += b;
                     }
-                    Err(error) => {
-                        eprintln!("      ❌ Error while copying {:?}: {}", path, error);
-                        next_checksum_tree.lock().unwrap().remove_at(path);
-                        has_error = true;
-                    }
-                };
-            }
-            _ => unreachable!(),
-        };
-    }
+                    bytes.fetch_add(b, std::sync::atomic::Ordering::SeqCst);
+                }
+                Err(error) => {
+                    pb.finish_and_clear();
+                    progress_bars.remove(&pb);
+                    eprintln!("      ❌ Error while copying {:?}: {}", path, error);
+                    next_checksum_tree.lock().unwrap().remove_at(path);
+                    has_error.store(true, std::sync::atomic::Ordering::SeqCst);
+                }
+            };
+            transports.lock().unwrap().push(transport);
+        });
+
+    stream::iter(put_actions)
+        .buffer_unordered(args.concurrency)
+        .collect::<Vec<_>>()
+        .await;
 
     // removing files
     println!("{} 🧻 Removing files", style("[8/9]").dim().bold());
@@ -264,47 +297,56 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .iter()
         .filter(|action| matches!(action, Action::Remove(_)))
         .collect();
-    for (i, action) in remove_actions.iter().enumerate() {
-        let n = std::time::Instant::now();
+    let remove_actions_len = remove_actions.len();
+    let remove_actions = remove_actions
+        .iter()
+        .enumerate()
+        .map(|(i, action)| async move {
+            let mut transport = transports.lock().unwrap().pop().unwrap();
 
-        match action {
-            Action::Remove(path) => {
-                match transport.remove(path).await {
-                    Ok(_) => {
-                        println!(
-                            "      ✅ Removed {}/{} file: {:?} in {:.2?}s",
-                            i + 1,
-                            remove_actions.len(),
-                            path,
-                            n.elapsed().as_secs_f64(),
-                        );
-                    }
-                    Err(error) => {
-                        eprintln!("      ❌ Error while removing {:?}: {}", path, error);
-                        has_error = true;
-                    }
-                };
-            }
-            _ => unreachable!(),
-        };
-    }
+            let n = std::time::Instant::now();
+
+            match action {
+                Action::Remove(path) => {
+                    match transport.remove(path).await {
+                        Ok(_) => {
+                            println!(
+                                "      ✅ Removed {}/{} file: {:?} in {:.2?}s",
+                                i + 1,
+                                remove_actions_len,
+                                path,
+                                n.elapsed().as_secs_f64(),
+                            );
+                        }
+                        Err(error) => {
+                            eprintln!("      ❌ Error while removing {:?}: {}", path, error);
+                            has_error.store(true, std::sync::atomic::Ordering::SeqCst);
+                        }
+                    };
+                }
+                _ => unreachable!(),
+            };
+            transports.lock().unwrap().push(transport);
+        });
+
+    stream::iter(remove_actions)
+        .buffer_unordered(args.concurrency)
+        .collect::<Vec<_>>()
+        .await;
+
+    let mut transport = make_transport(&args).await?;
 
     println!("{} 🏁 Uploading checksum", style("[9/9]").dim().bold());
     // save checksum
-    let next_checksum_tree = Arc::try_unwrap(next_checksum_tree)
-        .map_err(|_| <&str as Into<Box<dyn Error>>>::into("Failed to update checksums"))?
-        .into_inner()?;
     let json = serde_json::to_string_pretty(&next_checksum_tree)?;
 
-    let mut new_transport = make_transport(&args).await?;
-    new_transport
+    transport
         .write(
             Path::new(&args.checksum_file),
             Box::new(Cursor::new(json.as_bytes().to_vec())),
             Box::new(|_| {}),
         )
         .await?;
-    new_transport.close().await?;
 
     transport.close().await?;
 
@@ -314,7 +356,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         now.elapsed().as_secs_f64()
     );
 
-    if has_error {
+    if has_error.load(std::sync::atomic::Ordering::SeqCst) {
         panic!("There were errors");
     }
 
@@ -344,12 +386,20 @@ trait HumanBytes {
 
 impl HumanBytes for u64 {
     fn to_human_size(self) -> String {
-        if self > 1024 * 1024 {
-            format!("{:.2?}MB", self as f64 / 1024.0 / 1024.0)
-        } else if self > 1024 {
-            format!("{:.2?}KB", self as f64 / 1024.0)
+        let value = self;
+        if value > 1024 * 1024 {
+            format!("{:.2?}MB", value as f64 / 1024.0 / 1024.0)
+        } else if value > 1024 {
+            format!("{:.2?}KB", value as f64 / 1024.0)
         } else {
-            format!("{}B", self)
+            format!("{}B", value)
         }
+    }
+}
+
+impl HumanBytes for &AtomicU64 {
+    fn to_human_size(self) -> String {
+        let value = self.load(std::sync::atomic::Ordering::SeqCst);
+        value.to_human_size()
     }
 }
