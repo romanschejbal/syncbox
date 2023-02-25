@@ -13,6 +13,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64},
         Arc, Mutex,
     },
+    time::SystemTime,
 };
 use syncbox::{
     checksum_tree::ChecksumTree,
@@ -22,6 +23,7 @@ use syncbox::{
 use tokio::fs;
 
 const PROGRESS_BAR_CHARS: &str = "=»-";
+const DEFAULT_FILE_SIZE_THRESHOLD: u64 = 1;
 
 /// Syncbox like dropbox, but with arbitrary tranfer protocol
 #[derive(Parser, Debug, Clone)]
@@ -71,6 +73,9 @@ struct Args {
 
     #[arg(long, help = "Concurrency limit", default_value_t = 1)]
     concurrency: usize,
+
+    #[arg(long, help = "Files of size below this threshold (in MBs) will be read and digested using SHA256, the others will use metadata as the checksum", default_value_t = DEFAULT_FILE_SIZE_THRESHOLD)]
+    file_size_threshold: u64,
 }
 
 #[tokio::main]
@@ -113,8 +118,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map(|filepath| async move {
             pb.set_message(filepath.clone());
             let path_buf = PathBuf::from(filepath.clone());
-            let checksum = sha256::try_digest(path_buf.as_path())
-                .map_err(|e| format!("Failed checksum of {filepath:?} with error {e:?}"))?;
+            let metadata = tokio::fs::metadata(path_buf.as_path()).await.unwrap();
+            let checksum = if metadata.len() > args.file_size_threshold * 1024 * 1024 {
+                format!(
+                    "s{}_c{}_m{}",
+                    metadata.len(),
+                    metadata
+                        .created()?
+                        .duration_since(SystemTime::UNIX_EPOCH)?
+                        .as_secs(),
+                    metadata
+                        .modified()?
+                        .duration_since(SystemTime::UNIX_EPOCH)?
+                        .as_secs()
+                )
+            } else {
+                sha256::try_digest(path_buf.as_path())
+                    .map_err(|e| format!("Failed checksum of {filepath:?} with error {e:?}"))?
+            };
             pb.inc(1);
             Ok((filepath, checksum)) as Result<_, Box<dyn Error>>
         })
