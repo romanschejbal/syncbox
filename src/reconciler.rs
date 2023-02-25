@@ -17,7 +17,7 @@ impl Reconciler {
         next: &ChecksumTree,
     ) -> Result<Vec<Action>, Box<dyn Error>> {
         check_version(prev.get_version(), next.get_version())?;
-        let mut previous_checksum = prev.get_root().take().unwrap();
+        let mut previous_checksum = prev.get_root().take().unwrap_or_default();
         let mut actions = vec![];
         let root = next.deref().as_ref().unwrap();
         let mut to_reconcile = VecDeque::from([(vec![], root)]);

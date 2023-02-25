@@ -44,18 +44,18 @@ impl ChecksumTree {
 
     /// Used for when there was error uploading files
     pub fn remove_at(&mut self, path: &Path) {
-        let root_dir = self.get_root().take().unwrap();
+        let Some(root_dir) = self.get_root().take() else {
+            return;
+        };
         let mut stack = vec![root_dir];
         let mut path_str = vec![];
         for component in path.iter() {
             path_str.push(component);
-            match stack.last_mut().unwrap() {
-                ChecksumElement::Directory(dir) => {
-                    if let Some(next) = dir.remove(&component.to_string_lossy().to_string()) {
-                        stack.push(next);
-                    }
-                }
-                _ => unreachable!(),
+            let ChecksumElement::Directory(dir) = stack.last_mut().unwrap() else {
+                unreachable!();
+            };
+            if let Some(next) = dir.remove(&component.to_string_lossy().to_string()) {
+                stack.push(next);
             }
         }
         stack.pop();
@@ -72,8 +72,9 @@ impl ChecksumTree {
             }
         }
 
-        assert!(stack.len() == 1);
-        self.root = Some(stack.pop().unwrap());
+        if let Some(root) = stack.pop() {
+            self.root = Some(root);
+        }
     }
 }
 
