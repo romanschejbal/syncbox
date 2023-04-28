@@ -22,7 +22,7 @@ use syncbox::{
 };
 use tokio::fs;
 
-const PROGRESS_BAR_CHARS: &str = "=»-";
+const PROGRESS_BAR_CHARS: &str = "▰▰▱";
 const DEFAULT_FILE_SIZE_THRESHOLD: u64 = 1;
 
 /// Syncbox like dropbox, but with arbitrary tranfer protocol
@@ -76,6 +76,9 @@ struct Args {
 
     #[arg(long, help = "Files of size below this threshold (in MBs) will be read and digested using SHA256, the others will use metadata as the checksum", default_value_t = DEFAULT_FILE_SIZE_THRESHOLD)]
     file_size_threshold: u64,
+
+    #[arg(long, default_value_t = false)]
+    skip_removal: bool,
 }
 
 #[tokio::main]
@@ -249,7 +252,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let put_actions = put_actions.iter()
         .enumerate()
         .map(|(i, action)| async move {
-            let mut transport = transports.lock().unwrap().pop().unwrap();
 
             let n = std::time::Instant::now();
 
@@ -257,11 +259,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 unreachable!();
             };
 
+            let mut transport = transports.lock().unwrap().pop().unwrap();
             let file = fs::File::open(&path).await.unwrap();
             let pb = indicatif::ProgressBar::new(file.metadata().await.unwrap().len());
             let pb = Arc::new(progress_bars.add(pb));
             let mut template = format!("         [{}/{}] ", i + 1, put_actions_len);
-            template.push_str("[{elapsed_precise}] {wide_bar:.cyan/blue} {bytes}/{total_bytes} [{bytes_per_sec}] {msg}");
+            template.push_str("[{elapsed_precise}] {wide_bar:.cyan/black} {bytes}/{total_bytes} [{bytes_per_sec}] {msg}");
             pb.set_style(
                 ProgressStyle::with_template(&template)
                 .unwrap()
@@ -313,47 +316,54 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await;
 
     // removing files
-    println!("{} 🧻 Removing files", style("[8/9]").dim().bold());
-    let remove_actions: Vec<_> = todo
-        .iter()
-        .filter(|action| matches!(action, Action::Remove(_)))
-        .collect();
-    let remove_actions_len = remove_actions.len();
-    let remove_actions = remove_actions
-        .iter()
-        .enumerate()
-        .map(|(i, action)| async move {
-            let mut transport = transports.lock().unwrap().pop().unwrap();
+    if args.skip_removal {
+        println!(
+            "{} 🧻 Removing files (skipping)",
+            style("[8/9]").dim().bold()
+        );
+    } else {
+        println!("{} 🧻 Removing files", style("[8/9]").dim().bold());
+        let remove_actions: Vec<_> = todo
+            .iter()
+            .filter(|action| matches!(action, Action::Remove(_)))
+            .collect();
+        let remove_actions_len = remove_actions.len();
+        let remove_actions = remove_actions
+            .iter()
+            .enumerate()
+            .map(|(i, action)| async move {
+                let mut transport = transports.lock().unwrap().pop().unwrap();
 
-            let n = std::time::Instant::now();
+                let n = std::time::Instant::now();
 
-            match action {
-                Action::Remove(path) => {
-                    match transport.remove(path).await {
-                        Ok(_) => {
-                            println!(
-                                "      ✅ Removed {}/{} file: {:?} in {:.2?}s",
-                                i + 1,
-                                remove_actions_len,
-                                path,
-                                n.elapsed().as_secs_f64(),
-                            );
-                        }
-                        Err(error) => {
-                            eprintln!("      ❌ Error while removing {:?}: {}", path, error);
-                            has_error.store(true, std::sync::atomic::Ordering::SeqCst);
-                        }
-                    };
-                }
-                _ => unreachable!(),
-            };
-            transports.lock().unwrap().push(transport);
-        });
+                match action {
+                    Action::Remove(path) => {
+                        match transport.remove(path).await {
+                            Ok(_) => {
+                                println!(
+                                    "      ✅ Removed {}/{} file: {:?} in {:.2?}s",
+                                    i + 1,
+                                    remove_actions_len,
+                                    path,
+                                    n.elapsed().as_secs_f64(),
+                                );
+                            }
+                            Err(error) => {
+                                eprintln!("      ❌ Error while removing {:?}: {}", path, error);
+                                has_error.store(true, std::sync::atomic::Ordering::SeqCst);
+                            }
+                        };
+                    }
+                    _ => unreachable!(),
+                };
+                transports.lock().unwrap().push(transport);
+            });
 
-    stream::iter(remove_actions)
-        .buffer_unordered(args.concurrency)
-        .collect::<Vec<_>>()
-        .await;
+        stream::iter(remove_actions)
+            .buffer_unordered(args.concurrency)
+            .collect::<Vec<_>>()
+            .await;
+    }
 
     let mut transport = make_transport(&args).await?;
 
