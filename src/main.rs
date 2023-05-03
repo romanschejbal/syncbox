@@ -236,14 +236,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let bytes = &AtomicU64::new(0);
     let progress_bars = &indicatif::MultiProgress::new();
     let next_checksum_tree = &Mutex::new(next_checksum_tree);
-    let transports = &Mutex::new(
-        try_join_all(
-            (0..args.concurrency)
-                .into_iter()
-                .map(|_| make_transport(&args)),
-        )
-        .await?,
-    );
+    let transports =
+        &Mutex::new(try_join_all((0..args.concurrency).map(|_| make_transport(&args))).await?);
     let put_actions = todo
         .iter()
         .filter(|action| matches!(action, Action::Put(_)))

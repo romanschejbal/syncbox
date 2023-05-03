@@ -129,8 +129,8 @@ mod tests {
     #[test]
     fn empty() {
         let prev = ChecksumTree::default();
-        let mut next = ChecksumTree::default();
-        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
+        let next = ChecksumTree::default();
+        let diff = Reconciler::reconcile(prev, &next).unwrap();
 
         assert!(diff.is_empty());
     }
@@ -140,9 +140,9 @@ mod tests {
         let prev = ChecksumTree::default();
         let mut next = HashMap::new();
         next.insert("./file.txt".to_string(), "sha256hash".to_string());
-        let mut next: ChecksumTree = next.into();
+        let next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
+        let diff = Reconciler::reconcile(prev, &next).unwrap();
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -155,9 +155,9 @@ mod tests {
         let prev = ChecksumTree::default();
         let mut next = HashMap::new();
         next.insert("./direktory/file.txt".to_string(), "sha256hash".to_string());
-        let mut next: ChecksumTree = next.into();
+        let next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
+        let diff = Reconciler::reconcile(prev, &next).unwrap();
 
         assert!(diff.len() == 2);
         diff.into_iter()
@@ -176,9 +176,9 @@ mod tests {
             "./direktory/nested/file.txt".to_string(),
             "sha256hash".to_string(),
         );
-        let mut next: ChecksumTree = next.into();
+        let next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
+        let diff = Reconciler::reconcile(prev, &next).unwrap();
 
         assert!(diff.len() == 3);
         diff.into_iter()
@@ -197,9 +197,9 @@ mod tests {
         let prev: ChecksumTree = prev.into();
         let mut next = HashMap::new();
         next.insert("./file.txt".to_string(), "sha256hashThatsNew".to_string());
-        let mut next: ChecksumTree = next.into();
+        let next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
+        let diff = Reconciler::reconcile(prev, &next).unwrap();
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -217,9 +217,9 @@ mod tests {
             "./direktory/file.txt".to_string(),
             "sha256hashThatsNew".to_string(),
         );
-        let mut next: ChecksumTree = next.into();
+        let next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
+        let diff = Reconciler::reconcile(prev, &next).unwrap();
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -240,9 +240,9 @@ mod tests {
             "./direktory/nested/file.txt".to_string(),
             "sha256hashThatsNew".to_string(),
         );
-        let mut next: ChecksumTree = next.into();
+        let next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
+        let diff = Reconciler::reconcile(prev, &next).unwrap();
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -255,9 +255,9 @@ mod tests {
         let mut prev = HashMap::new();
         prev.insert("./file.txt".to_string(), "sha256hash".to_string());
         let prev: ChecksumTree = prev.into();
-        let mut next: ChecksumTree = ChecksumTree::default();
+        let next: ChecksumTree = ChecksumTree::default();
 
-        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
+        let diff = Reconciler::reconcile(prev, &next).unwrap();
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -270,9 +270,9 @@ mod tests {
         let mut prev = HashMap::new();
         prev.insert("./direktory/file.txt".to_string(), "sha256hash".to_string());
         let prev: ChecksumTree = prev.into();
-        let mut next: ChecksumTree = ChecksumTree::default();
+        let next: ChecksumTree = ChecksumTree::default();
 
-        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
+        let diff = Reconciler::reconcile(prev, &next).unwrap();
 
         assert!(diff.len() == 1);
         diff.into_iter()
@@ -305,9 +305,9 @@ mod tests {
             "./direktory2/nested/file2.txt".to_string(),
             "sha256hashThatsNew".to_string(),
         );
-        let mut next: ChecksumTree = next.into();
+        let next: ChecksumTree = next.into();
 
-        let diff = Reconciler::reconcile(prev, &mut next).unwrap();
+        let diff = Reconciler::reconcile(prev, &next).unwrap();
 
         assert!(diff.len() == 2);
         diff.into_iter()
@@ -320,14 +320,14 @@ mod tests {
 
     #[test]
     fn version_equal_ok() {
-        assert_eq!(check_version("0.1.0", "0.1.1").unwrap(), ());
+        assert_eq!(check_version("0.1.0", "0.1.1").ok(), Some(()));
     }
 
     #[test]
     fn version_older_ok() {
-        assert_eq!(check_version("0.1.2", "0.1.3").unwrap(), ());
-        assert_eq!(check_version("0.1.2", "1.1.3").unwrap(), ());
-        assert_eq!(check_version("10.1.2", "10.10.3").unwrap(), ());
+        assert_eq!(check_version("0.1.2", "0.1.3").ok(), Some(()));
+        assert_eq!(check_version("0.1.2", "1.1.3").ok(), Some(()));
+        assert_eq!(check_version("10.1.2", "10.10.3").ok(), Some(()));
     }
 
     #[test]
