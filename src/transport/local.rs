@@ -2,7 +2,6 @@ use super::Transport;
 use std::{
     error::Error,
     path::{Path, PathBuf},
-    process::Command,
 };
 use tokio::{fs, io::AsyncRead};
 
@@ -10,13 +9,10 @@ pub struct LocalFilesystem {
     dir: PathBuf,
 }
 
-impl Default for LocalFilesystem {
-    fn default() -> Self {
-        let dir =
-            String::from_utf8(Command::new("mktemp").arg("-d").output().unwrap().stdout).unwrap();
-        println!("Created temp dir: {dir}");
+impl LocalFilesystem {
+    pub fn new(dir: impl AsRef<Path>) -> Self {
         Self {
-            dir: dir.trim().into(),
+            dir: dir.as_ref().to_path_buf(),
         }
     }
 }
@@ -49,8 +45,8 @@ impl Transport for LocalFilesystem {
         Ok(tokio::io::copy(&mut source, &mut file).await?)
     }
 
-    async fn remove(&mut self, _pathname: &Path) -> Result<(), Box<dyn Error>> {
-        Ok(())
+    async fn remove(&mut self, pathname: &Path) -> Result<(), Box<dyn Error>> {
+        Ok(tokio::fs::remove_file(pathname).await?)
     }
 
     async fn close(self: Box<Self>) -> Result<(), Box<dyn Error>> {

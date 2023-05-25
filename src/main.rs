@@ -18,7 +18,7 @@ use std::{
 use syncbox::{
     checksum_tree::ChecksumTree,
     reconciler::{Action, Reconciler},
-    transport::{ftp::Ftp, Transport},
+    transport::{ftp::Ftp, local::LocalFilesystem, Transport},
 };
 use tokio::fs;
 
@@ -390,14 +390,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn make_transport(args: &Args) -> Result<Box<dyn Transport>, Box<dyn Error>> {
     Ok(if args.dry_run {
-        Box::<syncbox::transport::local::LocalFilesystem>::default()
+        Box::new(LocalFilesystem::new(&args.ftp_dir))
     } else {
         Box::new(
             Ftp::new(
-                args.ftp_host.clone(),
-                args.ftp_user.clone(),
-                args.ftp_pass.clone(),
-                args.ftp_dir.clone(),
+                &args.ftp_host,
+                &args.ftp_user,
+                &args.ftp_pass,
+                &args.ftp_dir,
             )
             .connect(args.use_tls)
             .await?,
