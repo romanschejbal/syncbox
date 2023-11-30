@@ -6,7 +6,7 @@ pub mod ftp;
 pub mod local;
 pub mod s3;
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 pub trait Transport {
     async fn read_last_checksum(
         &mut self,

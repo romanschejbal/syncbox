@@ -227,7 +227,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 
     // reconcile
     println!("{} 🚚 Reconciling changes", style("[4/9]").dim().bold(),);
-    let todo = Reconciler::reconcile(previous_checksum_tree, &next_checksum_tree)?;
+    let todo = Arc::new(Reconciler::reconcile(
+        previous_checksum_tree,
+        &next_checksum_tree,
+    )?);
 
     if todo.is_empty() {
         println!("      🤷 Nothing to do");
@@ -245,7 +248,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         return Ok(());
     }
 
-    let has_error = &AtomicBool::new(false);
+    let has_error = Arc::new(AtomicBool::new(false));
 
     // first create directories
     println!("{} 📂 Creating directories", style("[6/9]").dim().bold());
@@ -279,17 +282,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         };
     }
 
-    let checksum_path = Path::new(&args.checksum_file);
+    let checksum_path = Arc::new(PathBuf::from(&args.checksum_file));
 
     // upload files
-    let bytes = &AtomicU64::new(0);
-    let progress_bars = &indicatif::MultiProgress::new();
-    let next_checksum_tree = &Mutex::new(next_checksum_tree);
-    let transports =
-        &Mutex::new(try_join_all((0..args.concurrency).map(|_| make_transport(&args))).await?);
+    let bytes = Arc::new(AtomicU64::new(0));
+    let progress_bars = Arc::new(indicatif::MultiProgress::new());
+    let next_checksum_tree = Arc::new(Mutex::new(next_checksum_tree));
+    let transports = Arc::new(Mutex::new(
+        try_join_all((0..args.concurrency).map(|_| make_transport(&args))).await?,
+    ));
     let mut put_actions = todo
         .iter()
         .filter(|action| matches!(action, Action::Put(_)))
+        .cloned()
         .collect::<Vec<_>>();
     put_actions.sort_by(|a, b| {
         let Action::Put(a) = a else { unreachable!() };
@@ -300,7 +305,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
             std::cmp::Ordering::Greater
         }
     });
-    let total_to_upload = &AtomicU64::new(
+    let put_actions = Arc::new(put_actions);
+    let total_to_upload = Arc::new(AtomicU64::new(
         put_actions
             .iter()
             .map(|action| {
@@ -310,7 +316,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                 std::fs::metadata(path).unwrap().len()
             })
             .sum::<u64>(),
-    );
+    ));
     println!(
         "{} 🏂 Uploading {} files ({})",
         style("[7/9]").dim().bold(),
@@ -318,93 +324,103 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         total_to_upload.to_human_size()
     );
     let put_actions_len = put_actions.len();
-    let finished_paths = &Arc::new(Mutex::new(HashSet::new()));
-    let put_actions_ref = &put_actions;
+    let finished_paths = Arc::new(Mutex::new(HashSet::new()));
     let put_actions = put_actions.iter()
         .enumerate()
-        .map(|(i, action)| async move {
+        .map(|(i, action)| {
+            let total_to_upload = Arc::clone(&total_to_upload);
+            let checksum_path = Arc::clone(&checksum_path);
+            let put_actions = Arc::clone(&put_actions);
+            let finished_paths = Arc::clone(&finished_paths);
+            let transports = Arc::clone(&transports);
+            let progress_bars = Arc::clone(&progress_bars);
+            let bytes = Arc::clone(&bytes);
+            let next_checksum_tree = Arc::clone(&next_checksum_tree);
+            let has_error = Arc::clone(&has_error);
+            let action = action.clone();
+            tokio::spawn(async move {
+                let n = std::time::Instant::now();
 
-            let n = std::time::Instant::now();
+                let Action::Put(path) = action else {
+                    unreachable!();
+                };
 
-            let Action::Put(path) = action else {
-                unreachable!();
-            };
-
-            let mut transport = transports.lock().await.pop().unwrap();
-            let file = fs::File::open(&path).await.unwrap();
-            let metadata = file.metadata().await.unwrap();
-            let pb = indicatif::ProgressBar::new(metadata.len());
-            let pb = Arc::new(progress_bars.add(pb));
-            let mut template = format!("         [{}/{}] ", i + 1, put_actions_len);
-            template.push_str("[{elapsed_precise}] {wide_bar:.cyan/blue} {bytes}/{total_bytes} [{bytes_per_sec}] {msg}");
-            pb.set_style(
-                ProgressStyle::with_template(&template)
-                .unwrap()
-                .progress_chars(PROGRESS_BAR_CHARS),
-            );
-            let msg = path.to_path_buf().to_str().unwrap().to_string();
-            pb.set_message(msg);
-            pb.inc(0);
-            let pb_inner = Arc::clone(&pb);
-            let file = progress::ProgressStream::new(file,Box::new(move |uploaded| {
-                pb_inner.set_position(uploaded);
-            }));
-            match transport
-                .write(
-                    path,
-                    Box::new(file),
-                    metadata.len()
-                )
-                .await
-            {
-                Ok(b) => {
-                    bytes.fetch_add(b, SeqCst);
-                    if args.concurrency == 1 {
-                        println!(
-                            "      ✅ Copied {}/{} file: {:?} {} in {:.2?}s, {} remaining",
-                            i + 1,
-                            put_actions_len,
-                            path,
-                            b.to_human_size(),
-                            n.elapsed().as_secs_f64(),
-                            (total_to_upload.load(SeqCst) - bytes.load(SeqCst)).to_human_size(),
-                        );
+                let mut transport = transports.lock().await.pop().unwrap();
+                let file = fs::File::open(&path).await.unwrap();
+                let metadata = file.metadata().await.unwrap();
+                let pb = indicatif::ProgressBar::new(metadata.len());
+                let pb = Arc::new(progress_bars.add(pb));
+                let mut template = format!("         [{}/{}] ", i + 1, put_actions_len);
+                template.push_str("[{elapsed_precise}] {wide_bar:.cyan/blue} {bytes}/{total_bytes} [{bytes_per_sec}] {msg}");
+                pb.set_style(
+                    ProgressStyle::with_template(&template)
+                    .unwrap()
+                    .progress_chars(PROGRESS_BAR_CHARS),
+                );
+                let msg = path.to_path_buf().to_str().unwrap().to_string();
+                pb.set_message(msg);
+                pb.inc(0);
+                let pb_inner = Arc::clone(&pb);
+                let file = progress::ProgressStream::new(file,Box::new(move |uploaded| {
+                    pb_inner.set_position(uploaded);
+                }));
+                match transport
+                    .write(
+                        path.as_path(),
+                        Box::new(file),
+                        metadata.len()
+                    )
+                    .await
+                {
+                    Ok(b) => {
+                        bytes.fetch_add(b, SeqCst);
+                        if args.concurrency == 1 {
+                            println!(
+                                "      ✅ Copied {}/{} file: {:?} {} in {:.2?}s, {} remaining",
+                                i + 1,
+                                put_actions_len,
+                                path,
+                                b.to_human_size(),
+                                n.elapsed().as_secs_f64(),
+                                (total_to_upload.load(SeqCst) - bytes.load(SeqCst)).to_human_size(),
+                            );
+                        }
+                        finished_paths.lock().await.insert(path.clone());
+                        // if we are uploading checksums intermittently, do it now
+                        if args.intermittent_checksum_upload > 0
+                            && finished_paths.lock().await.len() > 0 && finished_paths.lock().await.len()
+                                % args.intermittent_checksum_upload
+                                == 0
+                        {
+                            let mut intermittent_checksum = next_checksum_tree.lock().await.clone();
+                            let finished_paths = finished_paths.lock().await;
+                            put_actions.iter().filter_map(|action| {
+                                let Action::Put(path) = action else {
+                                    unreachable!();
+                                };
+                                if !finished_paths.contains(path) {
+                                    Some(path)
+                                } else {
+                                    None
+                                }
+                            }).for_each(|path| {
+                                intermittent_checksum.remove_at(path);
+                            });
+                            transport.write_last_checksum(checksum_path.as_path(), &intermittent_checksum).await.unwrap();
+                        }
+                        pb.finish_and_clear();
+                        progress_bars.remove(&pb);
                     }
-                    finished_paths.lock().await.insert(path.clone());
-                    // if we are uploading checksums intermittently, do it now
-                    if args.intermittent_checksum_upload > 0
-                        && finished_paths.lock().await.len() > 0 && finished_paths.lock().await.len()
-                            % args.intermittent_checksum_upload
-                            == 0
-                    {
-                        let mut intermittent_checksum = next_checksum_tree.lock().await.clone();
-                        let finished_paths = finished_paths.lock().await;
-                        put_actions_ref.iter().filter_map(|action| {
-                            let Action::Put(path) = action else {
-                                unreachable!();
-                            };
-                            if !finished_paths.contains(path) {
-                                Some(path)
-                            } else {
-                                None
-                            }
-                        }).for_each(|path| {
-                            intermittent_checksum.remove_at(path);
-                        });
-                        transport.write_last_checksum(checksum_path, &intermittent_checksum).await.unwrap();
+                    Err(error) => {
+                        pb.finish_and_clear();
+                        progress_bars.remove(&pb);
+                        eprintln!("      ❌ Error while copying {:?}: {}", path, error);
+                        next_checksum_tree.lock().await.remove_at(path.as_path());
+                        has_error.store(true, SeqCst);
                     }
-                    pb.finish_and_clear();
-                    progress_bars.remove(&pb);
-                }
-                Err(error) => {
-                    pb.finish_and_clear();
-                    progress_bars.remove(&pb);
-                    eprintln!("      ❌ Error while copying {:?}: {}", path, error);
-                    next_checksum_tree.lock().await.remove_at(path);
-                    has_error.store(true, SeqCst);
-                }
-            };
-            transports.lock().await.push(transport);
+                };
+                transports.lock().await.push(transport);
+            })
         });
 
     stream::iter(put_actions)
@@ -423,19 +439,21 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         let remove_actions: Vec<_> = todo
             .iter()
             .filter(|action| matches!(action, Action::Remove(_)))
+            .cloned()
             .collect();
         let remove_actions_len = remove_actions.len();
-        let remove_actions = remove_actions
-            .iter()
-            .enumerate()
-            .map(|(i, action)| async move {
+        let remove_actions = remove_actions.iter().enumerate().map(|(i, action)| {
+            let transports = Arc::clone(&transports);
+            let has_error = Arc::clone(&has_error);
+            let action = action.clone();
+            tokio::spawn(async move {
                 let mut transport = transports.lock().await.pop().unwrap();
 
                 let n = std::time::Instant::now();
 
                 match action {
                     Action::Remove(path) => {
-                        match transport.remove(path).await {
+                        match transport.remove(path.as_path()).await {
                             Ok(_) => {
                                 println!(
                                     "      ✅ Removed {}/{} file: {:?} in {:.2?}s",
@@ -454,7 +472,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                     _ => unreachable!(),
                 };
                 transports.lock().await.push(transport);
-            });
+            })
+        });
 
         stream::iter(remove_actions)
             .buffer_unordered(args.concurrency)
@@ -466,7 +485,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 
     println!("{} 🏁 Uploading checksum", style("[9/9]").dim().bold());
     transport
-        .write_last_checksum(checksum_path, &*next_checksum_tree.lock().await)
+        .write_last_checksum(checksum_path.as_path(), &*next_checksum_tree.lock().await)
         .await?;
 
     transport.close().await?;
@@ -486,7 +505,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 
 async fn make_transport(
     args: &Args,
-) -> Result<Box<dyn Transport>, Box<dyn Error + Send + Sync + 'static>> {
+) -> Result<Box<dyn Transport + Send + Sync>, Box<dyn Error + Send + Sync + 'static>> {
     Ok(match &args.transport {
         TransportType::Ftp {
             ftp_host,

@@ -17,7 +17,7 @@ impl LocalFilesystem {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Transport for LocalFilesystem {
     async fn read(
         &mut self,

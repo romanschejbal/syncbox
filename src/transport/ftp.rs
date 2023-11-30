@@ -1,8 +1,6 @@
 use super::Transport;
-use futures::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use std::io::ErrorKind;
+use futures::AsyncReadExt;
 use std::net::ToSocketAddrs;
-use std::pin::Pin;
 use std::{error::Error, path::Path};
 use suppaftp::async_native_tls::TlsConnector;
 use suppaftp::types::FileType;
@@ -72,7 +70,7 @@ impl Ftp<Disconnected> {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Transport for Ftp<Connected> {
     async fn read(
         &mut self,
@@ -137,55 +135,18 @@ impl Transport for Ftp<Connected> {
             .unwrap()
             .transfer_type(FileType::Binary)
             .await?;
-        let writer = self
+        let size = self
             .stream
             .as_mut()
             .unwrap()
-            .put_with_stream(
-                filename
-                    .to_str()
-                    .ok_or(format!("failed converting Path to str: {filename:?}"))
-                    .map_err(FtpError::SecureError)?,
+            .put_file(
+                filename.to_str().ok_or(format!(
+                    "Failed converting path to str, filename: {filename:?}"
+                ))?,
+                &mut reader.compat(),
             )
             .await?;
-
-        let reader = Box::into_pin(reader);
-        let reader = Box::pin(TokioAsyncReadCompatExt::compat(reader));
-
-        async fn write_inner(
-            mut reader: Pin<Box<dyn futures::AsyncRead>>,
-            writer: &mut Pin<Box<impl AsyncWrite>>,
-        ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
-            let mut buf = [0; 8 * 1024];
-            let mut len = 0;
-
-            loop {
-                match reader.read(&mut buf).await {
-                    Ok(0) => {
-                        break;
-                    }
-                    Ok(n) => {
-                        len += n;
-                        writer.write_all(&buf[..n]).await?;
-                        writer.flush().await?;
-                    }
-                    Err(e) if e.kind() == ErrorKind::Interrupted => continue,
-                    Err(e) => {
-                        return Err(e.into());
-                    }
-                };
-            }
-            Ok(len as u64)
-        }
-
-        let mut writer = Box::pin(writer);
-        let result = write_inner(reader, &mut writer).await;
-        self.stream
-            .as_mut()
-            .unwrap()
-            .finalize_put_stream(writer)
-            .await?;
-        result
+        Ok(size)
     }
 
     async fn remove(

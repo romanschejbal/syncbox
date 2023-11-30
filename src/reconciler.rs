@@ -2,7 +2,7 @@ use crate::checksum_tree::{ChecksumElement, ChecksumTree};
 use std::error::Error;
 use std::{collections::VecDeque, ops::Deref, path::PathBuf};
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
     Mkdir(PathBuf),
     Put(PathBuf),

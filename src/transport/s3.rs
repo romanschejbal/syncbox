@@ -90,7 +90,7 @@ impl AwsS3 {
     }
 }
 
-#[async_trait::async_trait(?Send)]
+#[async_trait::async_trait]
 impl Transport for AwsS3 {
     async fn read(
         &mut self,
