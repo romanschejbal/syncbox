@@ -130,7 +130,7 @@ impl Transport for AwsS3 {
         checksum_filename: &Path,
         checksum_tree: &ChecksumTree,
     ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
-        let json = serde_json::to_string_pretty(checksum_tree)?;
+        let json = checksum_tree.to_gzip()?;
         let file_size = json.len();
         let cursor = Cursor::new(json);
         AwsS3::write(

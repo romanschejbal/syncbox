@@ -1,15 +1,16 @@
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    error::Error,
     ops::{Deref, DerefMut},
     path::Path,
 };
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ChecksumElement {
-    #[serde(rename = "d", alias = "Directory")]
+    #[serde(alias = "d")]
     Directory(HashMap<String, ChecksumElement>),
-    #[serde(rename = "f", alias = "File")]
+    #[serde(alias = "f")]
     File(String),
 }
 
@@ -75,6 +76,17 @@ impl ChecksumTree {
         if let Some(root) = stack.pop() {
             self.root = Some(root);
         }
+    }
+
+    pub fn to_gzip(&self) -> Result<Vec<u8>, Box<dyn Error + Send + Sync + 'static>> {
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+        serde_json::to_writer(&mut encoder, self).unwrap();
+        Ok(encoder.finish()?)
+    }
+
+    pub fn from_gzip(bytes: &[u8]) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
+        let mut decoder = flate2::read::GzDecoder::new(bytes);
+        Ok(serde_json::from_reader(&mut decoder)?)
     }
 }
 

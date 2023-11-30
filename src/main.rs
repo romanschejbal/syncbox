@@ -32,7 +32,7 @@ struct Args {
     #[arg(
         long,
         help = "Name of the checksum file",
-        default_value = ".syncbox.json"
+        default_value = ".syncbox.json.gz"
     )]
     checksum_file: String,
 
@@ -320,7 +320,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
             let pb = indicatif::ProgressBar::new(metadata.len());
             let pb = Arc::new(progress_bars.add(pb));
             let mut template = format!("         [{}/{}] ", i + 1, put_actions_len);
-            template.push_str("[{elapsed_precise}] {wide_bar:.cyan/black} {bytes}/{total_bytes} [{bytes_per_sec}] {msg}");
+            template.push_str("[{elapsed_precise}] {wide_bar:.cyan/blue} {bytes}/{total_bytes} [{bytes_per_sec}] {msg}");
             pb.set_style(
                 ProgressStyle::with_template(&template)
                 .unwrap()

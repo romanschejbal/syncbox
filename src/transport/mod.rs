@@ -16,7 +16,7 @@ pub trait Transport {
             .read(checksum_filename)
             .await
             .ok()
-            .map(|bytes| serde_json::from_slice::<ChecksumTree>(&bytes))
+            .map(|bytes| ChecksumTree::from_gzip(&bytes))
             .transpose()?
             .unwrap_or_default())
     }
@@ -26,7 +26,7 @@ pub trait Transport {
         checksum_filename: &Path,
         checksum_tree: &ChecksumTree,
     ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
-        let json = serde_json::to_string_pretty(checksum_tree)?;
+        let json = checksum_tree.to_gzip()?;
         let file_size = json.len();
         let cursor = Cursor::new(json);
         self.write(checksum_filename, Box::new(cursor), file_size as u64)
