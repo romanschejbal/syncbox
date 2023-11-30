@@ -5,7 +5,7 @@ use std::{
     path::Path,
 };
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum ChecksumElement {
     #[serde(rename = "d", alias = "Directory")]
     Directory(HashMap<String, ChecksumElement>),
@@ -19,7 +19,7 @@ impl Default for ChecksumElement {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ChecksumTree {
     #[serde(default)]
     version: String,

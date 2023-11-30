@@ -4,7 +4,7 @@ use core::panic;
 use futures::{future::try_join_all, stream, StreamExt};
 use indicatif::ProgressStyle;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     error::Error,
     ffi::OsString,
     path::{Path, PathBuf},
@@ -42,6 +42,14 @@ struct Args {
         default_value_t = false
     )]
     checksum_only: bool,
+
+    #[arg(
+        long,
+        short,
+        help = "Will upload checksum file every N files",
+        default_value_t = 0
+    )]
+    intermittent_checksum_upload: usize,
 
     #[command(subcommand)]
     transport: TransportType,
@@ -267,6 +275,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         };
     }
 
+    let checksum_path = Path::new(&args.checksum_file);
+
     // upload files
     println!("{} 🏂 Uploading files", style("[7/9]").dim().bold());
     let bytes = &AtomicU64::new(0);
@@ -279,6 +289,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         .filter(|action| matches!(action, Action::Put(_)))
         .collect::<Vec<_>>();
     let put_actions_len = put_actions.len();
+    let finished_paths = &Arc::new(Mutex::new(HashSet::new()));
+    let put_actions_ref = &put_actions;
     let put_actions = put_actions.iter()
         .enumerate()
         .map(|(i, action)| async move {
@@ -317,8 +329,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                 .await
             {
                 Ok(b) => {
-                    pb.finish_and_clear();
-                    progress_bars.remove(&pb);
                     if args.concurrency == 1 {
                         println!(
                             "      ✅ Copied {}/{} file: {:?} {} in {:.2?}s",
@@ -330,6 +340,31 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                         );
                     }
                     bytes.fetch_add(b, std::sync::atomic::Ordering::SeqCst);
+                    finished_paths.lock().await.insert(path.clone());
+                    // if we are uploading checksums intermittently, do it now
+                    if args.intermittent_checksum_upload > 0
+                        && finished_paths.lock().await.len() > 0 && finished_paths.lock().await.len()
+                            % args.intermittent_checksum_upload
+                            == 0
+                    {
+                        let mut intermittent_checksum = next_checksum_tree.lock().await.clone();
+                        let finished_paths = finished_paths.lock().await;
+                        put_actions_ref.iter().filter_map(|action| {
+                            let Action::Put(path) = action else {
+                                unreachable!();
+                            };
+                            if !finished_paths.contains(path) {
+                                Some(path)
+                            } else {
+                                None
+                            }
+                        }).for_each(|path| {
+                            intermittent_checksum.remove_at(path);
+                        });
+                        transport.write_last_checksum(checksum_path, &intermittent_checksum).await.unwrap();
+                    }
+                    pb.finish_and_clear();
+                    progress_bars.remove(&pb);
                 }
                 Err(error) => {
                     pb.finish_and_clear();
@@ -401,10 +436,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 
     println!("{} 🏁 Uploading checksum", style("[9/9]").dim().bold());
     transport
-        .write_last_checksum(
-            Path::new(&args.checksum_file),
-            &*next_checksum_tree.lock().await,
-        )
+        .write_last_checksum(checksum_path, &*next_checksum_tree.lock().await)
         .await?;
 
     transport.close().await?;

@@ -91,10 +91,20 @@ impl Transport for AwsS3 {
         &mut self,
         filename: &Path,
     ) -> Result<Vec<u8>, Box<dyn Error + Send + Sync + 'static>> {
+        let mut filename_with_prefix = PathBuf::new();
+        filename_with_prefix.push(&self.directory);
+        let key = filename_with_prefix
+            .join(filename)
+            .components()
+            .filter(|c| c.as_os_str() != ".")
+            .collect::<PathBuf>()
+            .to_string_lossy()
+            .to_string();
+
         // Read file from S3
         let get_req = GetObjectRequest {
             bucket: self.bucket.to_string(),
-            key: filename.to_string_lossy().to_string(),
+            key,
             ..Default::default()
         };
 
