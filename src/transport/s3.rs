@@ -2,8 +2,8 @@ use futures::stream::TryStreamExt;
 use rusoto_core::{ByteStream, Region};
 use rusoto_s3::{GetObjectRequest, PutObjectRequest, S3Client, S3};
 use std::io::{self, Cursor};
+use std::path::PathBuf;
 use std::{error::Error, path::Path};
-use tokio::fs::File;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_util::codec::{BytesCodec, FramedRead};
 
@@ -15,6 +15,7 @@ pub struct AwsS3 {
     bucket: String,
     client: S3Client,
     storage_class: String,
+    directory: PathBuf,
 }
 
 impl AwsS3 {
@@ -24,6 +25,7 @@ impl AwsS3 {
         access_key: impl AsRef<str>,
         secret_key: impl AsRef<str>,
         storage_class: impl AsRef<str>,
+        directory: PathBuf,
     ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
         let client = S3Client::new_with(
             rusoto_core::request::HttpClient::new().unwrap(),
@@ -37,6 +39,7 @@ impl AwsS3 {
             bucket: bucket.as_ref().to_string(),
             client,
             storage_class: storage_class.as_ref().to_string(),
+            directory,
         })
     }
 
@@ -47,9 +50,6 @@ impl AwsS3 {
         reader: Box<dyn AsyncRead + Unpin + Send>,
         file_size: u64,
     ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
-        // let file = File::open(file_path).await?;
-        // let file_size = tokio::fs::metadata(file_path).await?.len();
-
         let stream =
             FramedRead::new(reader, BytesCodec::new()).map_ok(|bytes_mut| bytes_mut.freeze());
 
@@ -58,12 +58,15 @@ impl AwsS3 {
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "File size is too large"))?;
 
         let file_stream = ByteStream::new_with_size(stream, file_size_usize);
-        // let file_stream = ByteStream::new(stream);
 
-        let key = file_path
+        let mut filename_with_prefix = PathBuf::new();
+        filename_with_prefix.push(&self.directory);
+        let key = filename_with_prefix
+            .join(file_path)
+            .components()
+            .filter(|c| c.as_os_str() != ".")
+            .collect::<PathBuf>()
             .to_string_lossy()
-            .to_string()
-            .trim_start_matches("./")
             .to_string();
 
         // Construct the request
@@ -76,12 +79,9 @@ impl AwsS3 {
         };
 
         // Send the request
-        self.client
-            .put_object(request)
-            .await
-            .map_err(|e| Box::new(e))?;
+        self.client.put_object(request).await.map_err(Box::new)?;
 
-        Ok(file_size as u64)
+        Ok(file_size)
     }
 }
 
@@ -113,7 +113,7 @@ impl Transport for AwsS3 {
         }
     }
 
-    async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+    async fn mkdir(&mut self, _path: &Path) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         // We don't need to create directories in S3
         Ok(())
     }
@@ -122,13 +122,12 @@ impl Transport for AwsS3 {
         &mut self,
         checksum_filename: &Path,
         checksum_tree: &ChecksumTree,
-        _progress_update_callback: Box<dyn Fn(u64)>,
     ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
         let json = serde_json::to_string_pretty(checksum_tree)?;
         let file_size = json.len();
         let cursor = Cursor::new(json);
         AwsS3::write(
-            &self,
+            self,
             checksum_filename,
             "STANDARD".to_string(),
             Box::new(cursor),
@@ -141,11 +140,10 @@ impl Transport for AwsS3 {
         &mut self,
         filename: &Path,
         reader: Box<dyn AsyncRead + Unpin + Send>,
-        update_progress_callback: Box<dyn Fn(u64)>,
         file_size: u64,
     ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
         AwsS3::write(
-            &self,
+            self,
             filename,
             self.storage_class.clone(),
             reader,
@@ -156,7 +154,7 @@ impl Transport for AwsS3 {
 
     async fn remove(
         &mut self,
-        mut pathname: &Path,
+        mut _pathname: &Path,
     ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         Err("not implemented".into())
     }

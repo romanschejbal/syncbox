@@ -16,6 +16,7 @@ use std::{
 };
 use syncbox::{
     checksum_tree::ChecksumTree,
+    progress,
     reconciler::{Action, Reconciler},
     transport::{ftp::Ftp, local::LocalFilesystem, s3::AwsS3, Transport},
 };
@@ -101,6 +102,8 @@ enum TransportType {
         secret_key: String,
         #[arg(long, default_value = "STANDARD")]
         storage_class: String,
+        #[arg(long, default_value = ".")]
+        directory: String,
     },
 }
 
@@ -288,8 +291,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 
             let mut transport = transports.lock().await.pop().unwrap();
             let file = fs::File::open(&path).await.unwrap();
-            let metadata = fs::metadata(&path).await.unwrap();
-            let pb = indicatif::ProgressBar::new(file.metadata().await.unwrap().len());
+            let metadata = file.metadata().await.unwrap();
+            let pb = indicatif::ProgressBar::new(metadata.len());
             let pb = Arc::new(progress_bars.add(pb));
             let mut template = format!("         [{}/{}] ", i + 1, put_actions_len);
             template.push_str("[{elapsed_precise}] {wide_bar:.cyan/black} {bytes}/{total_bytes} [{bytes_per_sec}] {msg}");
@@ -302,13 +305,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
             pb.set_message(msg);
             pb.inc(0);
             let pb_inner = Arc::clone(&pb);
+            let file = progress::ProgressStream::new(file,Box::new(move |uploaded| {
+                pb_inner.set_position(uploaded);
+            }));
             match transport
                 .write(
                     path,
                     Box::new(file),
-                    Box::new(move |uploaded| {
-                        pb_inner.inc(uploaded);
-                    }),
                     metadata.len()
                 )
                 .await
@@ -401,7 +404,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         .write_last_checksum(
             Path::new(&args.checksum_file),
             &*next_checksum_tree.lock().await,
-            Box::new(|_| {}),
         )
         .await?;
 
@@ -442,12 +444,14 @@ async fn make_transport(
             access_key,
             secret_key,
             storage_class,
+            directory,
         } => Box::new(AwsS3::new(
             bucket,
             region,
             access_key,
             secret_key,
             storage_class,
+            directory.into(),
         )?),
     })
 }

@@ -25,18 +25,12 @@ pub trait Transport {
         &mut self,
         checksum_filename: &Path,
         checksum_tree: &ChecksumTree,
-        progress_update_callback: Box<dyn Fn(u64)>,
     ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
         let json = serde_json::to_string_pretty(checksum_tree)?;
         let file_size = json.len();
         let cursor = Cursor::new(json);
-        self.write(
-            checksum_filename,
-            Box::new(cursor),
-            progress_update_callback,
-            file_size as u64,
-        )
-        .await
+        self.write(checksum_filename, Box::new(cursor), file_size as u64)
+            .await
     }
 
     async fn read(
@@ -49,8 +43,7 @@ pub trait Transport {
     async fn write(
         &mut self,
         filename: &Path,
-        read: Box<dyn AsyncRead + Unpin + Send>,
-        progress_update_callback: Box<dyn Fn(u64)>,
+        reader: Box<dyn AsyncRead + Unpin + Send>,
         file_size: u64,
     ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>>;
 

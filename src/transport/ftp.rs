@@ -133,8 +133,7 @@ impl Transport for Ftp<Connected> {
         &mut self,
         filename: &Path,
         reader: Box<dyn AsyncRead + Unpin + Send>,
-        update_progress_callback: Box<dyn Fn(u64)>,
-        file_size: u64,
+        _file_size: u64,
     ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
         self.stream
             .as_mut()
@@ -159,7 +158,6 @@ impl Transport for Ftp<Connected> {
         async fn write_inner(
             mut reader: Pin<Box<dyn futures::AsyncRead>>,
             writer: &mut Pin<Box<impl AsyncWrite>>,
-            update_progress_callback: Box<dyn Fn(u64)>,
         ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
             let mut buf = [0; 8 * 1024];
             let mut len = 0;
@@ -173,7 +171,6 @@ impl Transport for Ftp<Connected> {
                         len += n;
                         writer.write_all(&buf[..n]).await?;
                         writer.flush().await?;
-                        update_progress_callback(n as u64);
                     }
                     Err(e) if e.kind() == ErrorKind::Interrupted => continue,
                     Err(e) => {
@@ -185,7 +182,7 @@ impl Transport for Ftp<Connected> {
         }
 
         let mut writer = Box::pin(writer);
-        let result = write_inner(reader, &mut writer, update_progress_callback).await;
+        let result = write_inner(reader, &mut writer).await;
         self.stream
             .as_mut()
             .unwrap()

@@ -42,7 +42,6 @@ impl Transport for LocalFilesystem {
         &mut self,
         filename: &Path,
         source: Box<dyn AsyncRead + Unpin + Send>,
-        _progress_update_callback: Box<dyn Fn(u64)>,
         _file_size: u64,
     ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
         let mut dir = self.dir.clone();
