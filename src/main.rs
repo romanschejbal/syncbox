@@ -282,7 +282,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let checksum_path = Path::new(&args.checksum_file);
 
     // upload files
-    println!("{} 🏂 Uploading files", style("[7/9]").dim().bold());
     let bytes = &AtomicU64::new(0);
     let progress_bars = &indicatif::MultiProgress::new();
     let next_checksum_tree = &Mutex::new(next_checksum_tree);
@@ -301,6 +300,21 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
             std::cmp::Ordering::Greater
         }
     });
+    let total_to_upload = put_actions
+        .iter()
+        .map(|action| {
+            let Action::Put(path) = action else {
+                unreachable!();
+            };
+            std::fs::metadata(path).unwrap().len()
+        })
+        .sum::<u64>();
+    println!(
+        "{} 🏂 Uploading {} files ({})",
+        style("[7/9]").dim().bold(),
+        put_actions.len(),
+        total_to_upload.to_human_size()
+    );
     let put_actions_len = put_actions.len();
     let finished_paths = &Arc::new(Mutex::new(HashSet::new()));
     let put_actions_ref = &put_actions;
@@ -508,7 +522,9 @@ trait HumanBytes {
 impl HumanBytes for u64 {
     fn to_human_size(self) -> String {
         let value = self;
-        if value > 1024 * 1024 {
+        if value > 1024 * 1024 * 1024 {
+            format!("{:.2?}GB", value as f64 / 1024.0 / 1024.0 / 1024.0)
+        } else if value > 1024 * 1024 {
             format!("{:.2?}MB", value as f64 / 1024.0 / 1024.0)
         } else if value > 1024 {
             format!("{:.2?}KB", value as f64 / 1024.0)
