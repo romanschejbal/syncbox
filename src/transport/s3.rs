@@ -1,6 +1,6 @@
 use futures::stream::TryStreamExt;
 use rusoto_core::{ByteStream, Region};
-use rusoto_s3::{GetObjectRequest, PutObjectRequest, S3Client, S3};
+use rusoto_s3::{DeleteObjectRequest, GetObjectRequest, PutObjectRequest, S3Client, S3};
 use std::io::{self, Cursor};
 use std::path::PathBuf;
 use std::{error::Error, path::Path};
@@ -43,6 +43,19 @@ impl AwsS3 {
         })
     }
 
+    fn make_object_key(&self, path: &Path) -> String {
+        let mut filename_with_prefix = PathBuf::new();
+        filename_with_prefix.push(&self.directory);
+        let key = filename_with_prefix
+            .join(path)
+            .components()
+            .filter(|c| c.as_os_str() != ".")
+            .collect::<PathBuf>()
+            .to_string_lossy()
+            .to_string();
+        key
+    }
+
     async fn write(
         &self,
         file_path: &Path,
@@ -59,15 +72,7 @@ impl AwsS3 {
 
         let file_stream = ByteStream::new_with_size(stream, file_size_usize);
 
-        let mut filename_with_prefix = PathBuf::new();
-        filename_with_prefix.push(&self.directory);
-        let key = filename_with_prefix
-            .join(file_path)
-            .components()
-            .filter(|c| c.as_os_str() != ".")
-            .collect::<PathBuf>()
-            .to_string_lossy()
-            .to_string();
+        let key = self.make_object_key(file_path);
 
         // Construct the request
         let request = PutObjectRequest {
@@ -91,15 +96,7 @@ impl Transport for AwsS3 {
         &mut self,
         filename: &Path,
     ) -> Result<Vec<u8>, Box<dyn Error + Send + Sync + 'static>> {
-        let mut filename_with_prefix = PathBuf::new();
-        filename_with_prefix.push(&self.directory);
-        let key = filename_with_prefix
-            .join(filename)
-            .components()
-            .filter(|c| c.as_os_str() != ".")
-            .collect::<PathBuf>()
-            .to_string_lossy()
-            .to_string();
+        let key = self.make_object_key(filename);
 
         // Read file from S3
         let get_req = GetObjectRequest {
@@ -164,9 +161,15 @@ impl Transport for AwsS3 {
 
     async fn remove(
         &mut self,
-        mut _pathname: &Path,
+        pathname: &Path,
     ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-        Err("not implemented".into())
+        let key = self.make_object_key(pathname);
+        let delete_req = DeleteObjectRequest {
+            bucket: self.bucket.to_string(),
+            key,
+            ..Default::default()
+        };
+        Ok(self.client.delete_object(delete_req).await.map(|_| ())?)
     }
 
     async fn close(mut self: Box<Self>) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
