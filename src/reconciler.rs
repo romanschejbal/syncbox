@@ -15,7 +15,7 @@ impl Reconciler {
     pub fn reconcile(
         mut prev: ChecksumTree,
         next: &ChecksumTree,
-    ) -> Result<Vec<Action>, Box<dyn Error>> {
+    ) -> Result<Vec<Action>, Box<dyn Error + Send + Sync + 'static>> {
         check_version(prev.get_version(), next.get_version())?;
         let mut previous_checksum = prev.get_root().take().unwrap_or_default();
         let mut actions = vec![];
@@ -110,7 +110,7 @@ impl Reconciler {
 }
 
 /// Panics if previous version is newer
-fn check_version(prev: &str, next: &str) -> Result<(), Box<dyn Error>> {
+fn check_version(prev: &str, next: &str) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     if next < prev {
         return Err(format!(
             "Your version of syncbox seems outdated, please update to at least {prev}"

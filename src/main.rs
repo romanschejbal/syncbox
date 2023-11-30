@@ -82,7 +82,7 @@ struct Args {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     env_logger::init();
 
     let args = Args::parse();
@@ -118,33 +118,38 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .progress_chars(PROGRESS_BAR_CHARS),
     );
     let next_checksum_tree: ChecksumTree = stream::iter(files)
-        .map(|filepath| async move {
-            pb.set_message(filepath.clone());
-            let path_buf = PathBuf::from(filepath.clone());
-            let metadata = tokio::fs::metadata(path_buf.as_path()).await.unwrap();
-            let checksum = if metadata.len() > args.file_size_threshold * 1024 * 1024 {
-                format!(
-                    "s{}_c{}_m{}",
-                    metadata.len(),
-                    metadata
-                        .created()?
-                        .duration_since(SystemTime::UNIX_EPOCH)?
-                        .as_secs(),
-                    metadata
-                        .modified()?
-                        .duration_since(SystemTime::UNIX_EPOCH)?
-                        .as_secs()
-                )
-            } else {
-                sha256::try_digest(path_buf.as_path())
-                    .map_err(|e| format!("Failed checksum of {filepath:?} with error {e:?}"))?
-            };
-            pb.inc(1);
-            Ok((filepath, checksum)) as Result<_, Box<dyn Error>>
+        .map(|filepath| {
+            let pb = pb.clone();
+            tokio::spawn(async move {
+                pb.set_message(filepath.clone());
+                let path_buf = PathBuf::from(filepath.clone());
+                let metadata = tokio::fs::metadata(path_buf.as_path()).await.unwrap();
+                let checksum = if metadata.len() > args.file_size_threshold * 1024 * 1024 {
+                    format!(
+                        "s{}_c{}_m{}",
+                        metadata.len(),
+                        metadata
+                            .created()?
+                            .duration_since(SystemTime::UNIX_EPOCH)?
+                            .as_secs(),
+                        metadata
+                            .modified()?
+                            .duration_since(SystemTime::UNIX_EPOCH)?
+                            .as_secs()
+                    )
+                } else {
+                    sha256::try_digest(path_buf.as_path())
+                        .map_err(|e| format!("Failed checksum of {filepath:?} with error {e:?}"))?
+                };
+                pb.inc(1);
+                Ok((filepath, checksum)) as Result<_, Box<dyn Error + Send + Sync + 'static>>
+            })
         })
         .buffer_unordered(num_cpus::get())
         .collect::<Vec<_>>()
         .await
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .collect::<Result<HashMap<String, String>, _>>()?
         .into();
@@ -388,7 +393,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn make_transport(args: &Args) -> Result<Box<dyn Transport>, Box<dyn Error>> {
+async fn make_transport(
+    args: &Args,
+) -> Result<Box<dyn Transport>, Box<dyn Error + Send + Sync + 'static>> {
     Ok(if args.dry_run {
         Box::new(LocalFilesystem::new(&args.ftp_dir))
     } else {

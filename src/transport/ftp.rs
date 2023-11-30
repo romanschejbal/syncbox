@@ -40,7 +40,10 @@ impl Ftp<Disconnected> {
         }
     }
 
-    pub async fn connect(self, use_tls: bool) -> Result<Ftp<Connected>, Box<dyn Error>> {
+    pub async fn connect(
+        self,
+        use_tls: bool,
+    ) -> Result<Ftp<Connected>, Box<dyn Error + Send + Sync + 'static>> {
         let ip = &self
             .host
             .to_socket_addrs()?
@@ -74,7 +77,10 @@ impl Ftp<Disconnected> {
 
 #[async_trait::async_trait(?Send)]
 impl Transport for Ftp<Connected> {
-    async fn read(&mut self, filename: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
+    async fn read(
+        &mut self,
+        filename: &Path,
+    ) -> Result<Vec<u8>, Box<dyn Error + Send + Sync + 'static>> {
         let mut buf = vec![];
         self.stream
             .as_mut()
@@ -100,15 +106,18 @@ impl Transport for Ftp<Connected> {
         Ok(buf)
     }
 
-    async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn Error>> {
+    async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         match self
             .stream
             .as_mut()
             .unwrap()
             .mkdir(path.to_str().ok_or("fail converting path to str")?)
             .await
-            .map_err(|e| Box::<dyn Error>::from(format!("mkdir failed with error: {e}")))
-        {
+            .map_err(|e| {
+                Box::<dyn Error + Send + Sync + 'static>::from(format!(
+                    "mkdir failed with error: {e}"
+                ))
+            }) {
             Err(e) => {
                 if e.to_string().contains("File exists") {
                     // safe to ignore
@@ -125,7 +134,7 @@ impl Transport for Ftp<Connected> {
         filename: &Path,
         reader: Box<dyn AsyncRead>,
         update_progress_callback: Box<dyn Fn(u64)>,
-    ) -> Result<u64, Box<dyn Error>> {
+    ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
         self.stream
             .as_mut()
             .unwrap()
@@ -150,7 +159,7 @@ impl Transport for Ftp<Connected> {
             mut reader: Pin<Box<dyn futures::AsyncRead>>,
             writer: &mut Pin<Box<impl AsyncWrite>>,
             update_progress_callback: Box<dyn Fn(u64)>,
-        ) -> Result<u64, Box<dyn Error>> {
+        ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
             let mut buf = [0; 8 * 1024];
             let mut len = 0;
 
@@ -184,7 +193,10 @@ impl Transport for Ftp<Connected> {
         result
     }
 
-    async fn remove(&mut self, mut pathname: &Path) -> Result<(), Box<dyn Error>> {
+    async fn remove(
+        &mut self,
+        mut pathname: &Path,
+    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         self.stream
             .as_mut()
             .unwrap()
@@ -218,7 +230,7 @@ impl Transport for Ftp<Connected> {
         Ok(())
     }
 
-    async fn close(mut self: Box<Self>) -> Result<(), Box<dyn Error>> {
+    async fn close(mut self: Box<Self>) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         Ok(self.stream.as_mut().unwrap().quit().await?)
     }
 }

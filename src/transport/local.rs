@@ -19,13 +19,19 @@ impl LocalFilesystem {
 
 #[async_trait::async_trait(?Send)]
 impl Transport for LocalFilesystem {
-    async fn read(&mut self, filename: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
+    async fn read(
+        &mut self,
+        filename: &Path,
+    ) -> Result<Vec<u8>, Box<dyn Error + Send + Sync + 'static>> {
         let mut path = self.dir.clone();
         path.push(filename);
         Ok(fs::read(path).await?)
     }
 
-    async fn mkdir(&mut self, dir_path: &Path) -> Result<(), Box<dyn Error>> {
+    async fn mkdir(
+        &mut self,
+        dir_path: &Path,
+    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         let mut path = self.dir.clone();
         path.push(dir_path);
         tokio::fs::create_dir(path).await?;
@@ -37,7 +43,7 @@ impl Transport for LocalFilesystem {
         filename: &Path,
         source: Box<dyn AsyncRead>,
         _progress_update_callback: Box<dyn Fn(u64)>,
-    ) -> Result<u64, Box<dyn Error>> {
+    ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
         let mut dir = self.dir.clone();
         dir.push(filename);
         let mut file = tokio::fs::File::create(dir).await?;
@@ -45,11 +51,14 @@ impl Transport for LocalFilesystem {
         Ok(tokio::io::copy(&mut source, &mut file).await?)
     }
 
-    async fn remove(&mut self, pathname: &Path) -> Result<(), Box<dyn Error>> {
+    async fn remove(
+        &mut self,
+        pathname: &Path,
+    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         Ok(tokio::fs::remove_file(pathname).await?)
     }
 
-    async fn close(self: Box<Self>) -> Result<(), Box<dyn Error>> {
+    async fn close(self: Box<Self>) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         Ok(())
     }
 }

@@ -29,7 +29,7 @@ impl Sftp<Disconnected> {
         }
     }
 
-    pub async fn connect(self) -> Result<Sftp<Connected>, Box<dyn Error>> {
+    pub async fn connect(self) -> Result<Sftp<Connected>, Box<dyn Error + Send + Sync + 'static>> {
         let ip = &self
             .host
             .to_socket_addrs()?
@@ -67,7 +67,10 @@ impl Sftp<Disconnected> {
 
 #[async_trait::async_trait(?Send)]
 impl Transport for Sftp<Connected> {
-    async fn read(&mut self, filename: &Path) -> Result<Vec<u8>, Box<dyn Error>> {
+    async fn read(
+        &mut self,
+        filename: &Path,
+    ) -> Result<Vec<u8>, Box<dyn Error + Send + Sync + 'static>> {
         let mut client = self.client.lock().await;
         Ok(client
             .as_mut()
@@ -78,7 +81,7 @@ impl Transport for Sftp<Connected> {
             .map(|bytes| bytes.to_vec())?)
     }
 
-    async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn Error>> {
+    async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         // todo try 'static on the future only
         unimplemented!()
     }
@@ -87,15 +90,18 @@ impl Transport for Sftp<Connected> {
         &mut self,
         filename: &Path,
         read: Box<dyn Read + Send>,
-    ) -> Result<u64, Box<dyn Error>> {
+    ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
         unimplemented!()
     }
 
-    async fn remove(&mut self, pathname: &Path) -> Result<(), Box<dyn Error>> {
+    async fn remove(
+        &mut self,
+        pathname: &Path,
+    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         unimplemented!()
     }
 
-    async fn close(self: Box<Self>) -> Result<(), Box<dyn Error>> {
+    async fn close(self: Box<Self>) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         unimplemented!()
     }
 }

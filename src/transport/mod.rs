@@ -10,7 +10,7 @@ pub trait Transport {
     async fn get_last_checksum(
         &mut self,
         checksum_filename: &Path,
-    ) -> Result<ChecksumTree, Box<dyn Error>> {
+    ) -> Result<ChecksumTree, Box<dyn Error + Send + Sync + 'static>> {
         Ok(self
             .read(checksum_filename)
             .await
@@ -20,18 +20,24 @@ pub trait Transport {
             .unwrap_or_default())
     }
 
-    async fn read(&mut self, filename: &Path) -> Result<Vec<u8>, Box<dyn Error>>;
+    async fn read(
+        &mut self,
+        filename: &Path,
+    ) -> Result<Vec<u8>, Box<dyn Error + Send + Sync + 'static>>;
 
-    async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn Error>>;
+    async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn Error + Send + Sync + 'static>>;
 
     async fn write(
         &mut self,
         filename: &Path,
         read: Box<dyn AsyncRead>,
         progress_update_callback: Box<dyn Fn(u64)>,
-    ) -> Result<u64, Box<dyn Error>>;
+    ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>>;
 
-    async fn remove(&mut self, pathname: &Path) -> Result<(), Box<dyn Error>>;
+    async fn remove(
+        &mut self,
+        pathname: &Path,
+    ) -> Result<(), Box<dyn Error + Send + Sync + 'static>>;
 
-    async fn close(self: Box<Self>) -> Result<(), Box<dyn Error>>;
+    async fn close(self: Box<Self>) -> Result<(), Box<dyn Error + Send + Sync + 'static>>;
 }
