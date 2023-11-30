@@ -288,10 +288,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let next_checksum_tree = &Mutex::new(next_checksum_tree);
     let transports =
         &Mutex::new(try_join_all((0..args.concurrency).map(|_| make_transport(&args))).await?);
-    let put_actions = todo
+    let mut put_actions = todo
         .iter()
         .filter(|action| matches!(action, Action::Put(_)))
         .collect::<Vec<_>>();
+    put_actions.sort_by(|a, b| {
+        let Action::Put(a) = a else { unreachable!() };
+        let Action::Put(b) = b else { unreachable!() };
+        if std::fs::metadata(a).unwrap().len() < std::fs::metadata(b).unwrap().len() {
+            std::cmp::Ordering::Less
+        } else {
+            std::cmp::Ordering::Greater
+        }
+    });
     let put_actions_len = put_actions.len();
     let finished_paths = &Arc::new(Mutex::new(HashSet::new()));
     let put_actions_ref = &put_actions;
