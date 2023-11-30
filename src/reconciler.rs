@@ -91,8 +91,7 @@ impl Reconciler {
 
         // collect files that left in previous and mark them to be removed
         let mut stack: Vec<(PathBuf, &ChecksumElement)> = vec![("".into(), &previous_checksum)];
-        while !stack.is_empty() {
-            let (path, current) = stack.pop().unwrap();
+        while let Some((path, current)) = stack.pop() {
             match current {
                 ChecksumElement::Directory(dir) => {
                     dir.iter().for_each(|(dir_name, element)| {

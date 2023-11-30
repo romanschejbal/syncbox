@@ -46,16 +46,8 @@ struct Args {
     )]
     checksum_only: bool,
 
-    #[arg(long)]
-    ftp_host: String,
-    #[arg(long)]
-    ftp_user: String,
-    #[arg(long)]
-    ftp_pass: String,
-    #[arg(long)]
-    ftp_dir: String,
-    #[arg(long, default_value_t = false)]
-    use_tls: bool,
+    #[command(subcommand)]
+    transport: TransportType,
 
     #[arg(
         long,
@@ -79,6 +71,26 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     skip_removal: bool,
+}
+
+#[derive(Clone, Debug, Parser)]
+enum TransportType {
+    Ftp {
+        #[arg(long)]
+        ftp_host: String,
+        #[arg(long)]
+        ftp_user: String,
+        #[arg(long)]
+        ftp_pass: String,
+        #[arg(long)]
+        ftp_dir: String,
+        #[arg(long, default_value_t = false)]
+        use_tls: bool,
+    },
+    Local {
+        #[arg(long)]
+        destination: String,
+    },
 }
 
 #[tokio::main]
@@ -156,7 +168,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     pb.finish_and_clear();
 
     if args.checksum_only {
-        println!("         Writing checksum file to {}", args.checksum_file);
+        println!("      💿 Writing checksum file to {}", args.checksum_file);
         fs::write(
             Path::new(&args.checksum_file),
             serde_json::to_string_pretty(&next_checksum_tree)?,
@@ -201,6 +213,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         style("[5/9]").dim().bold(),
         style(todo.len()).bold()
     );
+
+    if args.dry_run {
+        println!("      🚨 Dry run, no changes will be made");
+        return Ok(());
+    }
 
     let has_error = &AtomicBool::new(false);
 
@@ -396,19 +413,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 async fn make_transport(
     args: &Args,
 ) -> Result<Box<dyn Transport>, Box<dyn Error + Send + Sync + 'static>> {
-    Ok(if args.dry_run {
-        Box::new(LocalFilesystem::new(&args.ftp_dir))
-    } else {
-        Box::new(
-            Ftp::new(
-                &args.ftp_host,
-                &args.ftp_user,
-                &args.ftp_pass,
-                &args.ftp_dir,
-            )
-            .connect(args.use_tls)
-            .await?,
-        )
+    Ok(match &args.transport {
+        TransportType::Ftp {
+            ftp_host,
+            ftp_user,
+            ftp_pass,
+            ftp_dir,
+            use_tls,
+        } => Box::new(
+            Ftp::new(ftp_host, ftp_user, ftp_pass, ftp_dir)
+                .connect(*use_tls)
+                .await?,
+        ),
+        TransportType::Local { destination } => Box::new(LocalFilesystem::new(destination)),
     })
 }
 
