@@ -9,7 +9,7 @@ use std::{
     ffi::OsString,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU64},
+        atomic::{AtomicBool, AtomicU64, Ordering::SeqCst},
         Arc,
     },
     time::SystemTime,
@@ -272,7 +272,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                         path,
                         error
                     );
-                    has_error.store(true, std::sync::atomic::Ordering::SeqCst);
+                    has_error.store(true, SeqCst);
                 }
             },
             _ => unreachable!(),
@@ -300,15 +300,17 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
             std::cmp::Ordering::Greater
         }
     });
-    let total_to_upload = put_actions
-        .iter()
-        .map(|action| {
-            let Action::Put(path) = action else {
-                unreachable!();
-            };
-            std::fs::metadata(path).unwrap().len()
-        })
-        .sum::<u64>();
+    let total_to_upload = &AtomicU64::new(
+        put_actions
+            .iter()
+            .map(|action| {
+                let Action::Put(path) = action else {
+                    unreachable!();
+                };
+                std::fs::metadata(path).unwrap().len()
+            })
+            .sum::<u64>(),
+    );
     println!(
         "{} 🏂 Uploading {} files ({})",
         style("[7/9]").dim().bold(),
@@ -356,17 +358,18 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                 .await
             {
                 Ok(b) => {
+                    bytes.fetch_add(b, SeqCst);
                     if args.concurrency == 1 {
                         println!(
-                            "      ✅ Copied {}/{} file: {:?} {} in {:.2?}s",
+                            "      ✅ Copied {}/{} file: {:?} {} in {:.2?}s, {} remaining",
                             i + 1,
                             put_actions_len,
                             path,
                             b.to_human_size(),
                             n.elapsed().as_secs_f64(),
+                            (total_to_upload.load(SeqCst) - bytes.load(SeqCst)).to_human_size(),
                         );
                     }
-                    bytes.fetch_add(b, std::sync::atomic::Ordering::SeqCst);
                     finished_paths.lock().await.insert(path.clone());
                     // if we are uploading checksums intermittently, do it now
                     if args.intermittent_checksum_upload > 0
@@ -398,7 +401,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                     progress_bars.remove(&pb);
                     eprintln!("      ❌ Error while copying {:?}: {}", path, error);
                     next_checksum_tree.lock().await.remove_at(path);
-                    has_error.store(true, std::sync::atomic::Ordering::SeqCst);
+                    has_error.store(true, SeqCst);
                 }
             };
             transports.lock().await.push(transport);
@@ -444,7 +447,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                             }
                             Err(error) => {
                                 eprintln!("      ❌ Error while removing {:?}: {}", path, error);
-                                has_error.store(true, std::sync::atomic::Ordering::SeqCst);
+                                has_error.store(true, SeqCst);
                             }
                         };
                     }
@@ -474,7 +477,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         now.elapsed().as_secs_f64()
     );
 
-    if has_error.load(std::sync::atomic::Ordering::SeqCst) {
+    if has_error.load(SeqCst) {
         panic!("There were errors");
     }
 
@@ -536,7 +539,7 @@ impl HumanBytes for u64 {
 
 impl HumanBytes for &AtomicU64 {
     fn to_human_size(self) -> String {
-        let value = self.load(std::sync::atomic::Ordering::SeqCst);
+        let value = self.load(SeqCst);
         value.to_human_size()
     }
 }

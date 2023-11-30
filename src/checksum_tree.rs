@@ -180,17 +180,17 @@ mod tests {
             r#"{
            "version": "0.3.0",
            "root": {
-             "d": {
+             "Directory": {
                ".": {
-                 "d": {
+                 "Directory": {
                    "DSC05947.ARW": {
-                     "f": "a4849b4f83f996ef9ce68b9f8561db4a991ab5f9dce3c52a45267c8e274bb73a"
+                     "File": "a4849b4f83f996ef9ce68b9f8561db4a991ab5f9dce3c52a45267c8e274bb73a"
                    },
                    "DSC06087.ARW": {
-                     "f": "aed5627230975590635e2f4809b6aa1f8ccc7f536fa97e08c76824ba093fbca3"
+                     "File": "aed5627230975590635e2f4809b6aa1f8ccc7f536fa97e08c76824ba093fbca3"
                    },
                    "DSC05953.ARW": {
-                     "f": "3e90e6673d78a1b12f51f417c4bfb555b5040557bef249a44faadc336273a55e"
+                     "File": "3e90e6673d78a1b12f51f417c4bfb555b5040557bef249a44faadc336273a55e"
                    }
                  }
                }
@@ -203,7 +203,7 @@ mod tests {
         checksum.remove_at(Path::new("./DSC05953.ARW"));
         assert_eq!(
             serde_json::to_string(&checksum).unwrap(),
-            r#"{"version":"0.3.0","root":{"d":{".":{"d":{"DSC05947.ARW":{"f":"a4849b4f83f996ef9ce68b9f8561db4a991ab5f9dce3c52a45267c8e274bb73a"}}}}}}"#
+            r#"{"version":"0.3.0","root":{"Directory":{".":{"Directory":{"DSC05947.ARW":{"File":"a4849b4f83f996ef9ce68b9f8561db4a991ab5f9dce3c52a45267c8e274bb73a"}}}}}}"#
         );
     }
 }
