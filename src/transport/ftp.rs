@@ -6,8 +6,8 @@ use std::pin::Pin;
 use std::{error::Error, path::Path};
 use suppaftp::async_native_tls::TlsConnector;
 use suppaftp::types::FileType;
-use suppaftp::FtpError;
-use suppaftp::FtpStream;
+use suppaftp::AsyncNativeTlsConnector;
+use suppaftp::{AsyncNativeTlsFtpStream, FtpError};
 use tokio::io::AsyncRead;
 use tokio_util::compat::TokioAsyncReadCompatExt;
 
@@ -19,7 +19,7 @@ pub struct Ftp<T = Disconnected> {
     user: String,
     pass: String,
     dir: String,
-    stream: Option<FtpStream>,
+    stream: Option<AsyncNativeTlsFtpStream>,
     _data: std::marker::PhantomData<T>,
 }
 
@@ -50,16 +50,13 @@ impl Ftp<Disconnected> {
             .find(|addr| addr.is_ipv4())
             .ok_or("could not resolve host")?;
         let domain = self.host.split(':').next().expect("Domain not valid");
-        let mut stream = FtpStream::connect(ip).await?;
+        let mut stream = AsyncNativeTlsFtpStream::connect(ip).await?;
         if use_tls {
+            let connector = TlsConnector::new()
+                .danger_accept_invalid_certs(true)
+                .danger_accept_invalid_hostnames(true);
             stream = stream
-                .into_secure(
-                    TlsConnector::new()
-                        .danger_accept_invalid_certs(true)
-                        .danger_accept_invalid_hostnames(true)
-                        .into(),
-                    domain,
-                )
+                .into_secure(AsyncNativeTlsConnector::from(connector), domain)
                 .await?;
         }
         stream.login(&self.user, &self.pass).await?;
