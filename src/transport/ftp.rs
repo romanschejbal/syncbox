@@ -132,8 +132,9 @@ impl Transport for Ftp<Connected> {
     async fn write(
         &mut self,
         filename: &Path,
-        reader: Box<dyn AsyncRead>,
+        reader: Box<dyn AsyncRead + Unpin + Send>,
         update_progress_callback: Box<dyn Fn(u64)>,
+        file_size: u64,
     ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
         self.stream
             .as_mut()

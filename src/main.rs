@@ -7,20 +7,19 @@ use std::{
     collections::HashMap,
     error::Error,
     ffi::OsString,
-    io::Cursor,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64},
-        Arc, Mutex,
+        Arc,
     },
     time::SystemTime,
 };
 use syncbox::{
     checksum_tree::ChecksumTree,
     reconciler::{Action, Reconciler},
-    transport::{ftp::Ftp, local::LocalFilesystem, Transport},
+    transport::{ftp::Ftp, local::LocalFilesystem, s3::AwsS3, Transport},
 };
-use tokio::fs;
+use tokio::{fs, sync::Mutex};
 
 const PROGRESS_BAR_CHARS: &str = "▰▰▱";
 const DEFAULT_FILE_SIZE_THRESHOLD: u64 = 1;
@@ -29,9 +28,6 @@ const DEFAULT_FILE_SIZE_THRESHOLD: u64 = 1;
 #[derive(Parser, Debug, Clone)]
 #[command(version, about = "Fast sync with remote filesystem")]
 struct Args {
-    #[arg(help = "Directory to diff against", default_value = ".")]
-    directory: String,
-
     #[arg(
         long,
         help = "Name of the checksum file",
@@ -71,6 +67,9 @@ struct Args {
 
     #[arg(long, default_value_t = false)]
     skip_removal: bool,
+
+    #[arg(help = "Directory to diff against", default_value = ".")]
+    directory: String,
 }
 
 #[derive(Clone, Debug, Parser)]
@@ -90,6 +89,18 @@ enum TransportType {
     Local {
         #[arg(long)]
         destination: String,
+    },
+    S3 {
+        #[arg(long)]
+        bucket: String,
+        #[arg(long)]
+        region: String,
+        #[arg(long)]
+        access_key: String,
+        #[arg(long)]
+        secret_key: String,
+        #[arg(long, default_value = "STANDARD")]
+        storage_class: String,
     },
 }
 
@@ -186,7 +197,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let mut transport = make_transport(&args).await?;
 
     let previous_checksum_tree = match transport
-        .get_last_checksum(Path::new(&args.checksum_file))
+        .read_last_checksum(Path::new(&args.checksum_file))
         .await
     {
         Ok(checksum) => checksum,
@@ -275,8 +286,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                 unreachable!();
             };
 
-            let mut transport = transports.lock().unwrap().pop().unwrap();
+            let mut transport = transports.lock().await.pop().unwrap();
             let file = fs::File::open(&path).await.unwrap();
+            let metadata = fs::metadata(&path).await.unwrap();
             let pb = indicatif::ProgressBar::new(file.metadata().await.unwrap().len());
             let pb = Arc::new(progress_bars.add(pb));
             let mut template = format!("         [{}/{}] ", i + 1, put_actions_len);
@@ -297,6 +309,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                     Box::new(move |uploaded| {
                         pb_inner.inc(uploaded);
                     }),
+                    metadata.len()
                 )
                 .await
             {
@@ -319,11 +332,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                     pb.finish_and_clear();
                     progress_bars.remove(&pb);
                     eprintln!("      ❌ Error while copying {:?}: {}", path, error);
-                    next_checksum_tree.lock().unwrap().remove_at(path);
+                    next_checksum_tree.lock().await.remove_at(path);
                     has_error.store(true, std::sync::atomic::Ordering::SeqCst);
                 }
             };
-            transports.lock().unwrap().push(transport);
+            transports.lock().await.push(transport);
         });
 
     stream::iter(put_actions)
@@ -348,7 +361,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
             .iter()
             .enumerate()
             .map(|(i, action)| async move {
-                let mut transport = transports.lock().unwrap().pop().unwrap();
+                let mut transport = transports.lock().await.pop().unwrap();
 
                 let n = std::time::Instant::now();
 
@@ -372,7 +385,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                     }
                     _ => unreachable!(),
                 };
-                transports.lock().unwrap().push(transport);
+                transports.lock().await.push(transport);
             });
 
         stream::iter(remove_actions)
@@ -384,13 +397,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let mut transport = make_transport(&args).await?;
 
     println!("{} 🏁 Uploading checksum", style("[9/9]").dim().bold());
-    // save checksum
-    let json = serde_json::to_string_pretty(&next_checksum_tree)?;
-
     transport
-        .write(
+        .write_last_checksum(
             Path::new(&args.checksum_file),
-            Box::new(Cursor::new(json.as_bytes().to_vec())),
+            &*next_checksum_tree.lock().await,
             Box::new(|_| {}),
         )
         .await?;
@@ -426,6 +436,19 @@ async fn make_transport(
                 .await?,
         ),
         TransportType::Local { destination } => Box::new(LocalFilesystem::new(destination)),
+        TransportType::S3 {
+            bucket,
+            region,
+            access_key,
+            secret_key,
+            storage_class,
+        } => Box::new(AwsS3::new(
+            bucket,
+            region,
+            access_key,
+            secret_key,
+            storage_class,
+        )?),
     })
 }
 
