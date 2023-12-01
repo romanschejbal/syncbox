@@ -428,7 +428,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     stream::iter(put_actions)
         .buffer_unordered(args.concurrency)
         .collect::<Vec<_>>()
-        .await;
+        .await
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()?;
 
     // removing files
     if args.skip_removal {
@@ -480,7 +482,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         stream::iter(remove_actions)
             .buffer_unordered(args.concurrency)
             .collect::<Vec<_>>()
-            .await;
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()?;
     }
 
     let mut transport = make_transport(&args).await?;
