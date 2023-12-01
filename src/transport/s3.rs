@@ -76,6 +76,18 @@ impl AwsS3 {
         // Use multipart for larger files
         const FILE_SIZE_THRESHOLD: usize = 1024 * 1024 * 100; // 1024 * 1024 * 1024 * 5;
         if file_size_usize > FILE_SIZE_THRESHOLD {
+            // divide file to 100MB chunks
+            const CHUNK_SIZE: usize = 100 * 1024 * 1024;
+            // make sure all chunks will be at least 5MBs
+            if file_size_usize % CHUNK_SIZE < 5 * 1024 * 1024 {
+                return Err("Last chunk is too small".into());
+            }
+
+            let mut parts = Vec::new();
+            let mut part_number = 1;
+            let mut buf = vec![0u8; CHUNK_SIZE];
+            let mut read_last = 0;
+
             let start_req = self
                 .client
                 .create_multipart_upload(CreateMultipartUploadRequest {
@@ -87,16 +99,6 @@ impl AwsS3 {
                 .await?;
             let upload_id = start_req.upload_id.ok_or("No upload ID received")?;
 
-            // divide file to 100MB chunks
-            const CHUNK_SIZE: usize = 100 * 1024 * 1024;
-            // make sure all chunks will be at least 5MBs
-            if file_size_usize % CHUNK_SIZE < 5 * 1024 * 1024 {
-                return Err("Last chunk is too small".into());
-            }
-            let mut parts = Vec::new();
-            let mut part_number = 1;
-            let mut buf = vec![0u8; CHUNK_SIZE];
-            let mut read_last = 0;
             loop {
                 let read = reader.read(&mut buf[read_last..CHUNK_SIZE]).await?;
                 read_last += read;
