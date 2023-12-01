@@ -1,6 +1,10 @@
 use futures::stream::TryStreamExt;
 use rusoto_core::{ByteStream, Region};
-use rusoto_s3::{DeleteObjectRequest, GetObjectRequest, PutObjectRequest, S3Client, S3};
+use rusoto_s3::{
+    CompleteMultipartUploadRequest, CompletedMultipartUpload, CompletedPart,
+    CreateMultipartUploadRequest, DeleteObjectRequest, GetObjectRequest, PutObjectRequest,
+    S3Client, UploadPartRequest, S3,
+};
 use std::io::{self, Cursor};
 use std::path::PathBuf;
 use std::{error::Error, path::Path};
@@ -60,33 +64,98 @@ impl AwsS3 {
         &self,
         file_path: &Path,
         storage_class: String,
-        reader: Box<dyn AsyncRead + Unpin + Send>,
+        mut reader: Box<dyn AsyncRead + Unpin + Send>,
         file_size: u64,
     ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
-        let stream =
-            FramedRead::new(reader, BytesCodec::new()).map_ok(|bytes_mut| bytes_mut.freeze());
-
         let file_size_usize = file_size
             .try_into()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "File size is too large"))?;
 
-        let file_stream = ByteStream::new_with_size(stream, file_size_usize);
-
         let key = self.make_object_key(file_path);
 
-        // Construct the request
-        let request = PutObjectRequest {
-            bucket: self.bucket.to_string(),
-            key,
-            body: Some(file_stream),
-            storage_class: Some(storage_class),
-            ..Default::default()
-        };
+        // Use multipart for larger files
+        const FILE_SIZE_THRESHOLD: usize = 1024 * 1024 * 100; // 1024 * 1024 * 1024 * 5;
+        if file_size_usize > FILE_SIZE_THRESHOLD {
+            let start_req = self
+                .client
+                .create_multipart_upload(CreateMultipartUploadRequest {
+                    bucket: self.bucket.to_string(),
+                    key: key.clone(),
+                    storage_class: Some(storage_class),
+                    ..Default::default()
+                })
+                .await?;
+            let upload_id = start_req.upload_id.ok_or("No upload ID received")?;
 
-        // Send the request
-        self.client.put_object(request).await.map_err(Box::new)?;
+            // divide file to 100MB chunks
+            const CHUNK_SIZE: usize = 100 * 1024 * 1024;
+            // make sure all chunks will be at least 5MBs
+            if file_size_usize % CHUNK_SIZE < 5 * 1024 * 1024 {
+                return Err("Last chunk is too small".into());
+            }
+            let mut parts = Vec::new();
+            let mut part_number = 1;
+            let mut buf = vec![0u8; CHUNK_SIZE];
+            let mut read_last = 0;
+            loop {
+                let read = reader.read(&mut buf[read_last..CHUNK_SIZE]).await?;
+                read_last += read;
+                if read == 0 && read_last == 0 {
+                    break;
+                } else if read > 0 && read_last < CHUNK_SIZE {
+                    continue;
+                }
 
-        Ok(file_size)
+                let upload_part_req = UploadPartRequest {
+                    bucket: self.bucket.to_string(),
+                    key: key.clone(),
+                    upload_id: upload_id.clone(),
+                    part_number,
+                    body: Some(buf[..read_last].to_vec().into()),
+                    ..Default::default()
+                };
+                let upload_part_res = self.client.upload_part(upload_part_req).await?;
+
+                let etag = upload_part_res.e_tag.ok_or("No ETag received")?;
+                parts.push(CompletedPart {
+                    e_tag: Some(etag),
+                    part_number: Some(part_number),
+                });
+
+                part_number += 1;
+                read_last = 0;
+            }
+
+            let complete_req = CompleteMultipartUploadRequest {
+                bucket: self.bucket.to_string(),
+                key,
+                upload_id,
+                multipart_upload: Some(CompletedMultipartUpload { parts: Some(parts) }),
+                ..Default::default()
+            };
+            self.client.complete_multipart_upload(complete_req).await?;
+
+            Ok(file_size)
+        } else {
+            let stream =
+                FramedRead::new(reader, BytesCodec::new()).map_ok(|bytes_mut| bytes_mut.freeze());
+
+            let file_stream = ByteStream::new_with_size(stream, file_size_usize);
+
+            // Construct the request
+            let request = PutObjectRequest {
+                bucket: self.bucket.to_string(),
+                key,
+                body: Some(file_stream),
+                storage_class: Some(storage_class),
+                ..Default::default()
+            };
+
+            // Send the request
+            self.client.put_object(request).await?;
+
+            Ok(file_size)
+        }
     }
 }
 
