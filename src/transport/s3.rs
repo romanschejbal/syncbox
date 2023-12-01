@@ -78,15 +78,22 @@ impl AwsS3 {
         const FILE_SIZE_THRESHOLD: usize = 1024 * 1024 * 100; // 1024 * 1024 * 1024 * 5;
         if file_size_usize > FILE_SIZE_THRESHOLD {
             // divide file to 100MB chunks
-            const CHUNK_SIZE: usize = 100 * 1024 * 1024;
+            let mut chunk_size: usize = 100 * 1024 * 1024;
             // make sure all chunks will be at least 5MBs
-            if file_size_usize % CHUNK_SIZE < 5 * 1024 * 1024 {
-                return Err("Last chunk is too small".into());
+            loop {
+                if chunk_size == 0 {
+                    return Err("Last chunk is too small".into());
+                }
+                if file_size_usize % chunk_size < 5 * 1024 * 1024 {
+                    chunk_size -= 1;
+                } else {
+                    break;
+                }
             }
 
             let mut parts = Vec::new();
             let mut part_number = 1;
-            let mut buf = vec![0u8; CHUNK_SIZE];
+            let mut buf = vec![0u8; chunk_size];
             let mut read_last = 0;
             let mut max_part_uploaded = 0;
 
@@ -119,15 +126,18 @@ impl AwsS3 {
                     .await?;
                 max_part_uploaded = uploaded_parts
                     .parts
-                    .unwrap_or(vec![])
-                    .into_iter()
+                    .as_ref()
+                    .unwrap_or(&vec![])
+                    .iter()
                     .map(|p| p.part_number.unwrap_or(0))
                     .max()
                     .unwrap_or(0);
-                println!(
-                    "         Resuming upload with ID: {} and part {}",
-                    upload_id, max_part_uploaded
-                );
+                for part in uploaded_parts.parts.unwrap_or(vec![]) {
+                    parts.push(CompletedPart {
+                        e_tag: part.e_tag,
+                        part_number: part.part_number,
+                    });
+                }
                 upload_id
             } else {
                 let start_req = self
@@ -143,11 +153,11 @@ impl AwsS3 {
             };
 
             loop {
-                let read = reader.read(&mut buf[read_last..CHUNK_SIZE]).await?;
+                let read = reader.read(&mut buf[read_last..chunk_size]).await?;
                 read_last += read;
                 if read == 0 && read_last == 0 {
                     break;
-                } else if read > 0 && read_last < CHUNK_SIZE {
+                } else if read > 0 && read_last < chunk_size {
                     continue;
                 }
 

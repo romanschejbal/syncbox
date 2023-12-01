@@ -35,8 +35,7 @@ where
         let after = buf.filled().len();
         self.bytes_read += after - before;
 
-        let cb = &self.update_progress_callback;
-        cb(self.bytes_read as u64);
+        (self.update_progress_callback)(self.bytes_read as u64);
 
         poll
     }
