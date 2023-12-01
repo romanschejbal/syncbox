@@ -2,8 +2,9 @@ use futures::stream::TryStreamExt;
 use rusoto_core::{ByteStream, Region};
 use rusoto_s3::{
     CompleteMultipartUploadRequest, CompletedMultipartUpload, CompletedPart,
-    CreateMultipartUploadRequest, DeleteObjectRequest, GetObjectRequest, PutObjectRequest,
-    S3Client, UploadPartRequest, S3,
+    CreateMultipartUploadRequest, DeleteObjectRequest, GetObjectRequest,
+    ListMultipartUploadsRequest, ListPartsRequest, PutObjectRequest, S3Client, UploadPartRequest,
+    S3,
 };
 use std::io::{self, Cursor};
 use std::path::PathBuf;
@@ -87,17 +88,59 @@ impl AwsS3 {
             let mut part_number = 1;
             let mut buf = vec![0u8; CHUNK_SIZE];
             let mut read_last = 0;
+            let mut max_part_uploaded = 0;
 
-            let start_req = self
+            let multipart_uploads = self
                 .client
-                .create_multipart_upload(CreateMultipartUploadRequest {
+                .list_multipart_uploads(ListMultipartUploadsRequest {
                     bucket: self.bucket.to_string(),
-                    key: key.clone(),
-                    storage_class: Some(storage_class),
+                    prefix: Some(key.clone()),
                     ..Default::default()
                 })
                 .await?;
-            let upload_id = start_req.upload_id.ok_or("No upload ID received")?;
+
+            let mut uploads = multipart_uploads.uploads.unwrap_or(vec![]);
+            uploads.sort_by(|a, b| {
+                a.initiated
+                    .as_ref()
+                    .unwrap()
+                    .cmp(b.initiated.as_ref().unwrap())
+            });
+
+            let upload_id = if let Some(upload_id) = uploads.pop().and_then(|u| u.upload_id) {
+                let uploaded_parts = self
+                    .client
+                    .list_parts(ListPartsRequest {
+                        bucket: self.bucket.to_string(),
+                        key: key.clone(),
+                        upload_id: upload_id.clone(),
+                        ..Default::default()
+                    })
+                    .await?;
+                max_part_uploaded = uploaded_parts
+                    .parts
+                    .unwrap_or(vec![])
+                    .into_iter()
+                    .map(|p| p.part_number.unwrap_or(0))
+                    .max()
+                    .unwrap_or(0);
+                println!(
+                    "         Resuming upload with ID: {} and part {}",
+                    upload_id, max_part_uploaded
+                );
+                upload_id
+            } else {
+                let start_req = self
+                    .client
+                    .create_multipart_upload(CreateMultipartUploadRequest {
+                        bucket: self.bucket.to_string(),
+                        key: key.clone(),
+                        storage_class: Some(storage_class),
+                        ..Default::default()
+                    })
+                    .await?;
+                start_req.upload_id.ok_or("No upload ID received")?
+            };
 
             loop {
                 let read = reader.read(&mut buf[read_last..CHUNK_SIZE]).await?;
@@ -108,21 +151,23 @@ impl AwsS3 {
                     continue;
                 }
 
-                let upload_part_req = UploadPartRequest {
-                    bucket: self.bucket.to_string(),
-                    key: key.clone(),
-                    upload_id: upload_id.clone(),
-                    part_number,
-                    body: Some(buf[..read_last].to_vec().into()),
-                    ..Default::default()
-                };
-                let upload_part_res = self.client.upload_part(upload_part_req).await?;
+                if part_number > max_part_uploaded {
+                    let upload_part_req = UploadPartRequest {
+                        bucket: self.bucket.to_string(),
+                        key: key.clone(),
+                        upload_id: upload_id.clone(),
+                        part_number,
+                        body: Some(buf[..read_last].to_vec().into()),
+                        ..Default::default()
+                    };
+                    let upload_part_res = self.client.upload_part(upload_part_req).await?;
 
-                let etag = upload_part_res.e_tag.ok_or("No ETag received")?;
-                parts.push(CompletedPart {
-                    e_tag: Some(etag),
-                    part_number: Some(part_number),
-                });
+                    let etag = upload_part_res.e_tag.ok_or("No ETag received")?;
+                    parts.push(CompletedPart {
+                        e_tag: Some(etag),
+                        part_number: Some(part_number),
+                    });
+                }
 
                 part_number += 1;
                 read_last = 0;
