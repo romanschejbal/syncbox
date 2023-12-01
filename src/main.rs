@@ -330,7 +330,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         .map(|(i, action)| {
             let total_to_upload = Arc::clone(&total_to_upload);
             let checksum_path = Arc::clone(&checksum_path);
-            let put_actions = Arc::clone(&put_actions);
+            let todo = Arc::clone(&todo);
             let finished_paths = Arc::clone(&finished_paths);
             let transports = Arc::clone(&transports);
             let progress_bars = Arc::clone(&progress_bars);
@@ -345,9 +345,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                     unreachable!();
                 };
 
-                let mut transport = transports.lock().await.pop().unwrap();
                 let file = fs::File::open(&path).await.unwrap();
                 let metadata = file.metadata().await.unwrap();
+                let mut transport = transports.lock().await.pop().unwrap();
                 let pb = indicatif::ProgressBar::new(metadata.len());
                 let pb = Arc::new(progress_bars.add(pb));
                 let mut template = format!("         [{}/{}] ", i + 1, put_actions_len);
@@ -394,9 +394,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                         {
                             let mut intermittent_checksum = next_checksum_tree.lock().await.clone();
                             let finished_paths = finished_paths.lock().await;
-                            put_actions.iter().filter_map(|action| {
-                                let Action::Put(path) = action else {
-                                    unreachable!();
+                            todo.iter().filter_map(|action| {
+                                let path = match action {
+                                    Action::Put(path) => path,
+                                    Action::Remove(path) => path,
+                                    Action::Mkdir(_) => return None, // done already above
                                 };
                                 if !finished_paths.contains(path) {
                                     Some(path)
