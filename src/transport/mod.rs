@@ -2,6 +2,7 @@ use crate::checksum_tree::ChecksumTree;
 use std::{error::Error, io::Cursor, path::Path};
 use tokio::io::AsyncRead;
 
+pub mod dry;
 pub mod ftp;
 pub mod local;
 pub mod s3;

@@ -18,7 +18,7 @@ use syncbox::{
     checksum_tree::ChecksumTree,
     progress,
     reconciler::{Action, Reconciler},
-    transport::{ftp::Ftp, local::LocalFilesystem, s3::AwsS3, Transport},
+    transport::{dry::DryTransport, ftp::Ftp, local::LocalFilesystem, s3::AwsS3, Transport},
 };
 use tokio::{fs, sync::Mutex};
 
@@ -53,13 +53,6 @@ struct Args {
 
     #[command(subcommand)]
     transport: TransportType,
-
-    #[arg(
-        long,
-        help = "Dry run, won't make any changes",
-        default_value_t = false
-    )]
-    dry_run: bool,
 
     #[arg(
         long,
@@ -113,6 +106,7 @@ enum TransportType {
         #[arg(long, default_value = ".")]
         directory: String,
     },
+    Dry,
 }
 
 #[tokio::main]
@@ -242,11 +236,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         style("[5/9]").dim().bold(),
         style(todo.len()).bold()
     );
-
-    if args.dry_run {
-        println!("      🚨 Dry run, no changes will be made");
-        return Ok(());
-    }
 
     let has_error = Arc::new(AtomicBool::new(false));
 
@@ -540,6 +529,7 @@ async fn make_transport(
             storage_class,
             directory.into(),
         )?),
+        TransportType::Dry => Box::new(DryTransport),
     })
 }
 
