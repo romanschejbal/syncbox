@@ -191,7 +191,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         println!("      💿 Writing checksum file to {}", args.checksum_file);
         fs::write(
             Path::new(&args.checksum_file),
-            serde_json::to_string_pretty(&next_checksum_tree)?,
+            next_checksum_tree.to_gzip()?,
         )
         .await?;
         return Ok(());
