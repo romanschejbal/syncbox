@@ -32,7 +32,8 @@ struct Args {
     #[arg(
         long,
         help = "Name of the checksum file",
-        default_value = ".syncbox.json.gz"
+        default_value = ".syncbox.json.gz",
+        env = "SYNCBOX_CHECKSUM_FILE"
     )]
     checksum_file: String,
 
@@ -47,7 +48,8 @@ struct Args {
         long,
         short,
         help = "Will upload checksum file every N files",
-        default_value_t = 0
+        default_value_t = 0,
+        env = "SYNCBOX_INTERMITTENT_CHECKSUM_UPLOAD"
     )]
     intermittent_checksum_upload: usize,
 
@@ -61,31 +63,41 @@ struct Args {
     )]
     force: bool,
 
-    #[arg(long, help = "Concurrency limit", default_value_t = 1)]
+    #[arg(
+        long,
+        help = "Concurrency limit",
+        default_value_t = 1,
+        env = "SYNCBOX_CONCURRENCY"
+    )]
     concurrency: usize,
 
-    #[arg(long, help = "Files of size below this threshold (in MBs) will be read and digested using SHA256, the others will use metadata as the checksum", default_value_t = DEFAULT_FILE_SIZE_THRESHOLD)]
+    #[arg(long, help = "Files of size below this threshold (in MBs) will be read and digested using SHA256, the others will use metadata as the checksum", default_value_t = DEFAULT_FILE_SIZE_THRESHOLD,
+        env = "SYNCBOX_FILE_THRESHOLD")]
     file_size_threshold: u64,
 
     #[arg(long, default_value_t = false)]
     skip_removal: bool,
 
-    #[arg(help = "Directory to diff against", default_value = ".")]
+    #[arg(
+        help = "Directory to diff against",
+        default_value = ".",
+        env = "SYNCBOX_DIRECTORY"
+    )]
     directory: String,
 }
 
 #[derive(Clone, Debug, Parser)]
 enum TransportType {
     Ftp {
-        #[arg(long)]
+        #[arg(long, env = "FTP_HOST")]
         ftp_host: String,
-        #[arg(long)]
+        #[arg(long, env = "FTP_USER")]
         ftp_user: String,
-        #[arg(long)]
+        #[arg(long, env = "FTP_PASS")]
         ftp_pass: String,
-        #[arg(long)]
+        #[arg(long, default_value = ".", env = "FTP_DIR")]
         ftp_dir: String,
-        #[arg(long, default_value_t = false)]
+        #[arg(long, default_value_t = false, env = "FTP_USE_TLS")]
         use_tls: bool,
     },
     Local {
@@ -93,17 +105,17 @@ enum TransportType {
         destination: String,
     },
     S3 {
-        #[arg(long)]
+        #[arg(long, env = "S3_BUCKET")]
         bucket: String,
-        #[arg(long)]
+        #[arg(long, env = "S3_REGION")]
         region: String,
-        #[arg(long)]
+        #[arg(long, env = "S3_ACCESS_KEY")]
         access_key: String,
-        #[arg(long)]
+        #[arg(long, env = "S3_SECRET_KEY")]
         secret_key: String,
-        #[arg(long, default_value = "STANDARD")]
+        #[arg(long, default_value = "STANDARD", env = "S3_STORAGE_CLASS")]
         storage_class: String,
-        #[arg(long, default_value = ".")]
+        #[arg(long, default_value = ".", env = "S3_DIRECTORY")]
         directory: String,
     },
     Dry,
@@ -112,6 +124,7 @@ enum TransportType {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     env_logger::init();
+    dotenvy::dotenv().ok();
 
     let args = Args::parse();
     let now = std::time::Instant::now();
