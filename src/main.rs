@@ -428,7 +428,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                             } else {
                                 pb.set_message("📸 Uploading intermittent checksum");
                             }
-                            if let Err(e) = transport.write_last_checksum(checksum_path.as_path(), &intermittent_checksum).await{
+                            if let Err(e) = transport.write_last_checksum(checksum_path.as_path(), &intermittent_checksum).await {
                                 eprintln!("      ❌ Error while uploading intermittent checksum: {}", e);
                             }
                         }
