@@ -341,7 +341,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let finished_paths = Arc::new(Mutex::new(HashSet::new()));
     let put_actions = put_actions.iter()
         .enumerate()
-        .skip(args.skip - create_directory_actions.len())
+        .skip((args.skip as i64 - create_directory_actions.len() as i64).max(0) as usize)
         .map(|(i, action)| {
             let total_to_upload = Arc::clone(&total_to_upload);
             let checksum_path = Arc::clone(&checksum_path);
@@ -469,7 +469,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         let remove_actions = remove_actions
             .iter()
             .enumerate()
-            .skip(args.skip - create_directory_actions.len() - put_actions_len)
+            .skip(
+                (args.skip as i64 - create_directory_actions.len() as i64 - put_actions_len as i64)
+                    .max(0) as usize,
+            )
             .map(|(i, action)| {
                 let transports = Arc::clone(&transports);
                 let has_error = Arc::clone(&has_error);
