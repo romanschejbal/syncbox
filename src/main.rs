@@ -80,7 +80,7 @@ struct Args {
     )]
     file_size_threshold: u64,
 
-    #[arg(long, default_value_t = false)]
+    #[arg(short, long, default_value_t = false)]
     skip_removal: bool,
 
     #[arg(
@@ -89,6 +89,9 @@ struct Args {
         env = "SYNCBOX_DIRECTORY"
     )]
     directory: String,
+
+    #[arg(long, help = "Skip first X actions", default_value_t = 0)]
+    skip: usize,
 }
 
 #[derive(Clone, Debug, Parser)]
@@ -264,6 +267,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         .filter(|action| matches!(action, Action::Mkdir(_)))
         .collect();
     for (i, action) in create_directory_actions.iter().enumerate() {
+        if i < args.skip {
+            continue;
+        }
+
         let n = std::time::Instant::now();
         match action {
             Action::Mkdir(path) => match transport.mkdir(path.as_path()).await {
@@ -334,6 +341,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let finished_paths = Arc::new(Mutex::new(HashSet::new()));
     let put_actions = put_actions.iter()
         .enumerate()
+        .skip(args.skip - create_directory_actions.len())
         .map(|(i, action)| {
             let total_to_upload = Arc::clone(&total_to_upload);
             let checksum_path = Arc::clone(&checksum_path);
@@ -458,38 +466,45 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
             .cloned()
             .collect();
         let remove_actions_len = remove_actions.len();
-        let remove_actions = remove_actions.iter().enumerate().map(|(i, action)| {
-            let transports = Arc::clone(&transports);
-            let has_error = Arc::clone(&has_error);
-            let action = action.clone();
-            tokio::spawn(async move {
-                let mut transport = transports.lock().await.pop().unwrap();
+        let remove_actions = remove_actions
+            .iter()
+            .enumerate()
+            .skip(args.skip - create_directory_actions.len() - put_actions_len)
+            .map(|(i, action)| {
+                let transports = Arc::clone(&transports);
+                let has_error = Arc::clone(&has_error);
+                let action = action.clone();
+                tokio::spawn(async move {
+                    let mut transport = transports.lock().await.pop().unwrap();
 
-                let n = std::time::Instant::now();
+                    let n = std::time::Instant::now();
 
-                match action {
-                    Action::Remove(path) => {
-                        match transport.remove(path.as_path()).await {
-                            Ok(_) => {
-                                println!(
-                                    "      ✅ Removed {}/{} file: {:?} in {:.2?}s",
-                                    i + 1,
-                                    remove_actions_len,
-                                    path,
-                                    n.elapsed().as_secs_f64(),
-                                );
-                            }
-                            Err(error) => {
-                                eprintln!("      ❌ Error while removing {:?}: {}", path, error);
-                                has_error.store(true, SeqCst);
-                            }
-                        };
-                    }
-                    _ => unreachable!(),
-                };
-                transports.lock().await.push(transport);
-            })
-        });
+                    match action {
+                        Action::Remove(path) => {
+                            match transport.remove(path.as_path()).await {
+                                Ok(_) => {
+                                    println!(
+                                        "      ✅ Removed {}/{} file: {:?} in {:.2?}s",
+                                        i + 1,
+                                        remove_actions_len,
+                                        path,
+                                        n.elapsed().as_secs_f64(),
+                                    );
+                                }
+                                Err(error) => {
+                                    eprintln!(
+                                        "      ❌ Error while removing {:?}: {}",
+                                        path, error
+                                    );
+                                    has_error.store(true, SeqCst);
+                                }
+                            };
+                        }
+                        _ => unreachable!(),
+                    };
+                    transports.lock().await.push(transport);
+                })
+            });
 
         stream::iter(remove_actions)
             .buffer_unordered(args.concurrency)
