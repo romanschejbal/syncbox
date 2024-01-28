@@ -32,7 +32,7 @@ struct Args {
     #[arg(
         long,
         help = "Name of the checksum file",
-        default_value = ".syncbox.json.gz",
+        default_value = "./.syncbox.json.gz",
         env = "SYNCBOX_CHECKSUM_FILE"
     )]
     checksum_file: String,
@@ -45,8 +45,8 @@ struct Args {
     checksum_only: bool,
 
     #[arg(
-        long,
         short,
+        long,
         help = "Will upload checksum file every N files",
         default_value_t = 0,
         env = "SYNCBOX_INTERMITTENT_CHECKSUM_UPLOAD"
@@ -64,6 +64,7 @@ struct Args {
     force: bool,
 
     #[arg(
+        short,
         long,
         help = "Concurrency limit",
         default_value_t = 1,
@@ -71,8 +72,12 @@ struct Args {
     )]
     concurrency: usize,
 
-    #[arg(long, help = "Files of size below this threshold (in MBs) will be read and digested using SHA256, the others will use metadata as the checksum", default_value_t = DEFAULT_FILE_SIZE_THRESHOLD,
-        env = "SYNCBOX_FILE_THRESHOLD")]
+    #[arg(
+        long,
+        help = "Files of size below this threshold (in MBs) will be read and digested using SHA256, the others will use metadata as the checksum",
+        default_value_t = DEFAULT_FILE_SIZE_THRESHOLD,
+        env = "SYNCBOX_FILE_THRESHOLD"
+    )]
     file_size_threshold: u64,
 
     #[arg(long, default_value_t = false)]
@@ -101,7 +106,7 @@ enum TransportType {
         use_tls: bool,
     },
     Local {
-        #[arg(long)]
+        #[arg(long, short)]
         destination: String,
     },
     S3 {
@@ -410,6 +415,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                             }).for_each(|path| {
                                 intermittent_checksum.remove_at(path);
                             });
+                            if args.concurrency == 1 {
+                                println!("      📸 Uploading intermittent checksum");
+                            } else {
+                                pb.set_message("📸 Uploading intermittent checksum");
+                            }
                             transport.write_last_checksum(checksum_path.as_path(), &intermittent_checksum).await.unwrap();
                         }
                         pb.finish_and_clear();

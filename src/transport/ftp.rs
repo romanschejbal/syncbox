@@ -47,7 +47,11 @@ impl Ftp<Disconnected> {
             .to_socket_addrs()?
             .find(|addr| addr.is_ipv4())
             .ok_or("could not resolve host")?;
-        let domain = self.host.split(':').next().expect("Domain not valid");
+        let domain = self
+            .host
+            .split(':')
+            .next()
+            .expect("domain not valid, should be in form ip:port");
         let mut stream = AsyncNativeTlsFtpStream::connect(ip).await?;
         if use_tls {
             let connector = TlsConnector::new()
@@ -141,7 +145,7 @@ impl Transport for Ftp<Connected> {
             .unwrap()
             .put_file(
                 filename.to_str().ok_or(format!(
-                    "Failed converting path to str, filename: {filename:?}"
+                    "failed converting path to str, filename: {filename:?}"
                 ))?,
                 &mut reader.compat(),
             )

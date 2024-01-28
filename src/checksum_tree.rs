@@ -43,38 +43,30 @@ impl ChecksumTree {
         &self.version
     }
 
-    /// Used for when there was error uploading files
+    /// Used for when there was an error while uploading files
     pub fn remove_at(&mut self, path: &Path) {
-        let Some(root_dir) = self.get_root().take() else {
-            return;
-        };
-        let mut stack = vec![root_dir];
-        let mut path_str = vec![];
-        for component in path.iter() {
-            path_str.push(component);
-            let ChecksumElement::Directory(dir) = stack.last_mut().unwrap() else {
-                unreachable!();
-            };
-            if let Some(next) = dir.remove(&component.to_string_lossy().to_string()) {
-                stack.push(next);
-            }
-        }
-        stack.pop();
-        path_str.pop();
+        if let Some(ChecksumElement::Directory(root_dir)) = self.root.as_mut() {
+            let mut current_dir = root_dir;
+            let components: Vec<_> = path
+                .iter()
+                .map(|c| c.to_string_lossy().to_string())
+                .collect();
 
-        while stack.len() > 1 {
-            let child = stack.pop().unwrap();
-            let parent = stack.last_mut().unwrap();
-            match parent {
-                ChecksumElement::Directory(ref mut dir) => {
-                    dir.insert(path_str.pop().unwrap().to_string_lossy().to_string(), child);
+            for (i, component) in components.iter().enumerate() {
+                // Check if we are at the last component (file or empty directory)
+                if i == components.len() - 1 {
+                    current_dir.remove(component);
+                    return;
                 }
-                _ => unreachable!(),
-            }
-        }
 
-        if let Some(root) = stack.pop() {
-            self.root = Some(root);
+                // Navigate to the next directory
+                if let Some(ChecksumElement::Directory(next_dir)) = current_dir.get_mut(component) {
+                    current_dir = next_dir;
+                } else {
+                    // Path does not exist, nothing to remove
+                    return;
+                }
+            }
         }
     }
 
@@ -204,6 +196,39 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&checksum).unwrap(),
             r#"{"version":"0.3.0","root":{"Directory":{".":{"Directory":{"DSC05947.ARW":{"File":"a4849b4f83f996ef9ce68b9f8561db4a991ab5f9dce3c52a45267c8e274bb73a"}}}}}}"#
+        );
+    }
+
+    #[test]
+    fn remove_at_similar() {
+        let mut checksum: ChecksumTree = serde_json::from_str(
+            r#"{
+           "version": "0.3.0",
+           "root": {
+             "Directory": {
+               "dirrr": {
+                 "Directory": {
+                   "DSC05947.ARW": {
+                     "File": "a4849b4f83f996ef9ce68b9f8561db4a991ab5f9dce3c52a45267c8e274bb73a"
+                   },
+                   "DSC06087.ARW": {
+                     "File": "aed5627230975590635e2f4809b6aa1f8ccc7f536fa97e08c76824ba093fbca3"
+                   },
+                   "DSC05953.ARW": {
+                     "File": "3e90e6673d78a1b12f51f417c4bfb555b5040557bef249a44faadc336273a55e"
+                   }
+                 }
+               }
+             }
+           }
+        }"#,
+        )
+        .unwrap();
+        checksum.remove_at(Path::new("dirrr/DSC06087.ARW"));
+        checksum.remove_at(Path::new("dirrr/DSC05953.ARW"));
+        assert_eq!(
+            serde_json::to_string(&checksum).unwrap(),
+            r#"{"version":"0.3.0","root":{"Directory":{"dirrr":{"Directory":{"DSC05947.ARW":{"File":"a4849b4f83f996ef9ce68b9f8561db4a991ab5f9dce3c52a45267c8e274bb73a"}}}}}}"#
         );
     }
 }
