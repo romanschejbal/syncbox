@@ -401,6 +401,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                             );
                         }
                         finished_paths.lock().await.insert(path.clone());
+                        pb.finish_and_clear();
+                        progress_bars.remove(&pb);
                         // if we are uploading checksums intermittently, do it now
                         if args.intermittent_checksum_upload > 0
                             && finished_paths.lock().await.len() > 0 && finished_paths.lock().await.len()
@@ -423,17 +425,11 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                             }).for_each(|path| {
                                 intermittent_checksum.remove_at(path);
                             });
-                            if args.concurrency == 1 {
-                                println!("      📸 Uploading intermittent checksum");
-                            } else {
-                                pb.set_message("📸 Uploading intermittent checksum");
-                            }
+                            println!("      📸 Uploading intermittent checksum");
                             if let Err(e) = transport.write_last_checksum(checksum_path.as_path(), &intermittent_checksum).await {
                                 eprintln!("      ❌ Error while uploading intermittent checksum: {}", e);
                             }
                         }
-                        pb.finish_and_clear();
-                        progress_bars.remove(&pb);
                     }
                     Err(error) => {
                         pb.finish_and_clear();
