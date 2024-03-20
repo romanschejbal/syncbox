@@ -131,7 +131,6 @@ enum TransportType {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-    env_logger::init();
     dotenvy::dotenv().ok();
 
     let args = Args::parse();
@@ -354,8 +353,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
             let has_error = Arc::clone(&has_error);
             let action = action.clone();
             tokio::spawn(async move {
-                let n = std::time::Instant::now();
-
                 let Action::Put(path) = action else {
                     unreachable!();
                 };
@@ -390,9 +387,8 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                     Ok(b) => {
                         bytes.fetch_add(b, SeqCst);
                         finished_paths.lock().await.insert(path.clone());
-                        let message = format!("✅ Copied file: {path:?} {} in {:.2?}s, {} remaining",
-                            b.to_human_size(),
-                            n.elapsed().as_secs_f64(),
+                        let message = format!("✅ Copied file: {} | {} remaining",
+                            path.to_string_lossy(),
                             (total_to_upload.load(SeqCst) - bytes.load(SeqCst)).to_human_size(),
                         );
                         pb.finish_with_message(message.clone());

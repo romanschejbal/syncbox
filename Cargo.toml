@@ -9,7 +9,6 @@ async-trait = "0.1.74"
 clap = {version = "4.4.10", features = ["derive", "env"]}
 console = "0.15.7"
 dotenvy = "0.15.7"
-env_logger = "0.10.1"
 flate2 = "1.0.28"
 futures = "0.3.29"
 ignore = "0.4.21"
