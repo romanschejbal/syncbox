@@ -389,6 +389,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                 {
                     Ok(b) => {
                         bytes.fetch_add(b, SeqCst);
+                        finished_paths.lock().await.insert(path.clone());
+                        pb.finish();
+                        // print what was copied
                         if args.concurrency == 1 {
                             println!(
                                 "      ✅ Copied {}/{} file: {:?} {} in {:.2?}s, {} remaining",
@@ -400,8 +403,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                                 (total_to_upload.load(SeqCst) - bytes.load(SeqCst)).to_human_size(),
                             );
                         }
-                        finished_paths.lock().await.insert(path.clone());
-                        pb.finish_and_clear();
                         progress_bars.remove(&pb);
                         // if we are uploading checksums intermittently, do it now
                         if args.intermittent_checksum_upload > 0
