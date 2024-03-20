@@ -61,6 +61,7 @@ impl Ftp<Disconnected> {
                 .into_secure(AsyncNativeTlsConnector::from(connector), domain)
                 .await?;
         }
+        stream.set_mode(suppaftp::Mode::ExtendedPassive);
         stream.login(&self.user, &self.pass).await?;
         stream.cwd(&self.dir).await?;
         Ok(Ftp {

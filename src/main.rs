@@ -390,20 +390,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                     Ok(b) => {
                         bytes.fetch_add(b, SeqCst);
                         finished_paths.lock().await.insert(path.clone());
-                        pb.finish();
-                        // print what was copied
-                        if args.concurrency == 1 {
-                            println!(
-                                "      ✅ Copied {}/{} file: {:?} {} in {:.2?}s, {} remaining",
-                                i + 1,
-                                put_actions_len,
-                                path,
-                                b.to_human_size(),
-                                n.elapsed().as_secs_f64(),
-                                (total_to_upload.load(SeqCst) - bytes.load(SeqCst)).to_human_size(),
-                            );
-                        }
-                        progress_bars.remove(&pb);
+                        let message = format!("✅ Copied file: {path:?} {} in {:.2?}s, {} remaining",
+                            b.to_human_size(),
+                            n.elapsed().as_secs_f64(),
+                            (total_to_upload.load(SeqCst) - bytes.load(SeqCst)).to_human_size(),
+                        );
+                        pb.finish_with_message(message.clone());
+                        // progress_bars.remove(&pb);
                         // if we are uploading checksums intermittently, do it now
                         if args.intermittent_checksum_upload > 0
                             && finished_paths.lock().await.len() > 0 && finished_paths.lock().await.len()
@@ -426,16 +419,16 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                             }).for_each(|path| {
                                 intermittent_checksum.remove_at(path);
                             });
-                            println!("      📸 Uploading intermittent checksum");
+                            pb.set_message("📸 Uploading intermittent checksum");
                             if let Err(e) = transport.write_last_checksum(checksum_path.as_path(), &intermittent_checksum).await {
-                                eprintln!("      ❌ Error while uploading intermittent checksum: {}", e);
+                                pb.set_message(format!("❌ Error while uploading intermittent checksum: {}", e));
+                            } else {
+                                pb.set_message(message);
                             }
                         }
                     }
                     Err(error) => {
-                        pb.finish_and_clear();
-                        progress_bars.remove(&pb);
-                        eprintln!("      ❌ Error while copying {:?}: {}", path, error);
+                        pb.set_message(format!("❌ Error while copying {:?}: {}", path, error));
                         next_checksum_tree.lock().await.remove_at(path.as_path());
                         has_error.store(true, SeqCst);
                     }
