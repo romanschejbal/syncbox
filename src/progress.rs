@@ -33,10 +33,8 @@ where
         let before = buf.filled().len();
         let poll = Pin::new(&mut self.reader).poll_read(cx, buf);
         let after = buf.filled().len();
-        self.bytes_read += after - before;
-
         (self.update_progress_callback)(self.bytes_read as u64);
-
+        self.bytes_read += after - before;
         poll
     }
 }
