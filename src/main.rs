@@ -164,7 +164,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let pb = &indicatif::ProgressBar::new(files.len().try_into()?);
     pb.set_style(
         ProgressStyle::with_template(
-            "         [{elapsed_precise}] {bar:50.cyan/blue} {pos:>7}/{len:7} {wide_msg}",
+            "[{elapsed_precise}] {bar:50.cyan/blue} {pos:>7}/{len:7} {wide_msg}",
         )
         .unwrap()
         .progress_chars(PROGRESS_BAR_CHARS),
@@ -208,7 +208,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     pb.finish_and_clear();
 
     if args.checksum_only {
-        println!("      💿 Writing checksum file to {}", args.checksum_file);
+        println!("💿 Writing checksum file to {}", args.checksum_file);
         fs::write(
             Path::new(&args.checksum_file),
             next_checksum_tree.to_gzip()?,
@@ -274,7 +274,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         match action {
             Action::Mkdir(path) => match transport.mkdir(path.as_path()).await {
                 Ok(_) => println!(
-                    "      ✅ Creating directory {}/{} {:?} in {:.2?}s",
+                    "✅ Creating directory {}/{} {:?} in {:.2?}s",
                     i + 1,
                     create_directory_actions.len(),
                     path,
@@ -282,7 +282,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                 ),
                 Err(error) => {
                     eprintln!(
-                        "      ❌ Error while creating directory {}/{} {:?}: {}",
+                        "❌ Error while creating directory {}/{} {:?}: {}",
                         i + 1,
                         create_directory_actions.len(),
                         path,
@@ -362,7 +362,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                 let mut transport = transports.lock().await.pop().unwrap();
                 let pb = indicatif::ProgressBar::new(metadata.len());
                 let pb = Arc::new(progress_bars.add(pb));
-                let mut template = format!("         [{}/{}] ", i + 1, put_actions_len);
+                let mut template = format!("[{}/{}] ", i + 1, put_actions_len);
                 template.push_str("[{elapsed_precise}] {wide_bar:.cyan/blue} {bytes}/{total_bytes} [{bytes_per_sec}] {msg}");
                 pb.set_style(
                     ProgressStyle::with_template(&template)
@@ -387,7 +387,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                     Ok(b) => {
                         bytes.fetch_add(b, SeqCst);
                         finished_paths.lock().await.insert(path.clone());
-                        let message = format!("✅ Copied file: {} | {} remaining",
+                        let message = format!("{} | {} remaining",
                             path.to_string_lossy(),
                             (total_to_upload.load(SeqCst) - bytes.load(SeqCst)).to_human_size(),
                         );
@@ -475,7 +475,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                             match transport.remove(path.as_path()).await {
                                 Ok(_) => {
                                     println!(
-                                        "      ✅ Removed {}/{} file: {:?} in {:.2?}s",
+                                        "✅ Removed {}/{} file: {:?} in {:.2?}s",
                                         i + 1,
                                         remove_actions_len,
                                         path,
@@ -483,10 +483,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                                     );
                                 }
                                 Err(error) => {
-                                    eprintln!(
-                                        "      ❌ Error while removing {:?}: {}",
-                                        path, error
-                                    );
+                                    eprintln!("❌ Error while removing {:?}: {}", path, error);
                                     has_error.store(true, SeqCst);
                                 }
                             };
@@ -515,7 +512,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     transport.close().await?;
 
     println!(
-        "      ✨ Done. Transfered {} in {:.2?}s",
+        "✨ Done. Transfered {} in {:.2?}s",
         bytes.to_human_size(),
         now.elapsed().as_secs_f64()
     );
