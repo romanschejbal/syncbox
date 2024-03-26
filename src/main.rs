@@ -424,7 +424,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                         }
                     }
                     Err(error) => {
-                        pb.set_message(format!("❌ Error while copying {:?}: {}", path, error));
+                        pb.abandon_with_message(format!("❌ Error while copying {:?}: {}", path, error));
                         next_checksum_tree.lock().await.remove_at(path.as_path());
                         has_error.store(true, SeqCst);
                     }
