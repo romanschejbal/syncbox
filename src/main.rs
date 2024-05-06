@@ -25,9 +25,9 @@ use tokio::{fs, sync::Mutex};
 const PROGRESS_BAR_CHARS: &str = "▰▰▱";
 const DEFAULT_FILE_SIZE_THRESHOLD: u64 = 1;
 
-/// Syncbox like dropbox, but with arbitrary tranfer protocol
+/// Fast sync with remote filesystem
 #[derive(Parser, Debug, Clone)]
-#[command(version, about = "Fast sync with remote filesystem")]
+#[command(version, about)]
 struct Args {
     #[arg(
         long,

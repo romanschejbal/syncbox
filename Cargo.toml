@@ -6,7 +6,7 @@ version = "0.5.0"
 
 [dependencies]
 async-trait = "0.1.74"
-clap = {version = "4.4.10", features = ["derive", "env"]}
+clap = {version = "4.4.10", features = ["derive", "env", "unicode"]}
 console = "0.15.7"
 dotenvy = "0.15.7"
 flate2 = "1.0.28"
