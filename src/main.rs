@@ -131,6 +131,7 @@ enum TransportType {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+    dotenvy::from_filename(".env.syncbox").ok();
     dotenvy::dotenv().ok();
 
     let args = Args::parse();
