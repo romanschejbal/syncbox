@@ -97,15 +97,15 @@ struct Args {
 #[derive(Clone, Debug, Parser)]
 enum TransportType {
     Ftp {
-        #[arg(long, env = "SYNCBOX_FTP_HOST")]
+        #[arg(long, env = "FTP_HOST")]
         ftp_host: String,
-        #[arg(long, env = "SYNCBOX_FTP_USER")]
+        #[arg(long, env = "FTP_USER")]
         ftp_user: String,
-        #[arg(long, env = "SYNCBOX_FTP_PASS")]
+        #[arg(long, env = "FTP_PASS")]
         ftp_pass: String,
-        #[arg(long, default_value = ".", env = "SYNCBOX_FTP_DIR")]
+        #[arg(long, default_value = ".", env = "FTP_DIR")]
         ftp_dir: String,
-        #[arg(long, default_value_t = false, env = "SYNCBOX_FTP_USE_TLS")]
+        #[arg(long, default_value_t = false, env = "FTP_USE_TLS")]
         use_tls: bool,
     },
     Local {
