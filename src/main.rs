@@ -393,7 +393,12 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                             (total_to_upload.load(SeqCst) - bytes.load(SeqCst)).to_human_size(),
                         );
                         pb.finish_with_message(message.clone());
-                        // progress_bars.remove(&pb);
+
+                        // if we are running on the CI, print successful message
+                        if std::env::var("CI").is_ok() {
+                            println!("✅ {}", message);
+                        }
+
                         // if we are uploading checksums intermittently, do it now
                         if args.intermittent_checksum_upload > 0
                             && finished_paths.lock().await.len() > 0 && finished_paths.lock().await.len()
@@ -425,9 +430,15 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                         }
                     }
                     Err(error) => {
-                        pb.abandon_with_message(format!("❌ Error while copying {:?}: {}", path, error));
+                        let message = format!("❌ Error while copying {:?}: {}", path, error);
+                        pb.abandon_with_message(message.clone());
                         next_checksum_tree.lock().await.remove_at(path.as_path());
                         has_error.store(true, SeqCst);
+
+                        // if we are running on the CI, print error message
+                        if std::env::var("CI").is_ok() {
+                            println!("{message}");
+                        }
                     }
                 };
                 transports.lock().await.push(transport);
