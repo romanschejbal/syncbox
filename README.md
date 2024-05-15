@@ -6,7 +6,7 @@ Syncbox is a versatile and efficient tool designed to synchronize files between 
 
 ## Features
 
-- **Support for Multiple Transfer Protocols**: Syncbox can synchronize files using FTP, local filesystems, and AWS S3.
+- **Support for Multiple Transfer Protocols**: Syncbox can synchronize files using FTP(S)/SFTP, local filesystems, and AWS S3.
 - **Checksum Verification**: Files are verified based on checksums, ensuring integrity and consistency during synchronization.
 - **Concurrent Uploads**: Leverage multi-threaded uploads for faster synchronization.
 - **Dry Run Option**: Preview changes before they are made, enhancing control over file synchronization.
@@ -51,7 +51,8 @@ syncbox [OPTIONS] transport [TRANSPORT OPTIONS]
 
 ### Transport Options
 
-- **FTP**: Provide FTP host, user, password, directory, and TLS usage details.
+- **FTP(S)**: Provide FTP host, user, password, directory, and TLS usage details.
+- **SFTP**: Provide SFTP host, user, password, directory.
 - **Local**: Specify the local destination directory.
 - **S3**: Set AWS S3 bucket details including region, access key, secret key, storage class, and directory.
 

@@ -6,6 +6,7 @@ pub mod dry;
 pub mod ftp;
 pub mod local;
 pub mod s3;
+pub mod sftp;
 
 #[async_trait::async_trait]
 pub trait Transport {

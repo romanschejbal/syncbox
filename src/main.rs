@@ -18,7 +18,9 @@ use syncbox::{
     checksum_tree::ChecksumTree,
     progress,
     reconciler::{Action, Reconciler},
-    transport::{dry::DryTransport, ftp::Ftp, local::LocalFilesystem, s3::AwsS3, Transport},
+    transport::{
+        dry::DryTransport, ftp::Ftp, local::LocalFilesystem, s3::AwsS3, sftp::SFtp, Transport,
+    },
 };
 use tokio::{fs, sync::Mutex};
 
@@ -107,6 +109,16 @@ enum TransportType {
         ftp_dir: String,
         #[arg(long, default_value_t = false, env = "FTP_USE_TLS")]
         use_tls: bool,
+    },
+    Sftp {
+        #[arg(long, env = "SFTP_HOST")]
+        host: String,
+        #[arg(long, env = "SFTP_USER")]
+        user: String,
+        #[arg(long, env = "SFTP_PASS")]
+        pass: String,
+        #[arg(long, default_value = ".", env = "SFTP_DIR")]
+        dir: String,
     },
     Local {
         #[arg(long, short)]
@@ -551,6 +563,12 @@ async fn make_transport(
                 .connect(*use_tls)
                 .await?,
         ),
+        TransportType::Sftp {
+            host,
+            user,
+            pass,
+            dir,
+        } => Box::new(SFtp::new(host, user, pass, dir).await?),
         TransportType::Local { destination } => Box::new(LocalFilesystem::new(destination)),
         TransportType::S3 {
             bucket,
