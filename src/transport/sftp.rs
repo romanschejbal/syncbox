@@ -34,12 +34,10 @@ impl SFtp {
             .unwrap();
 
         let sftp = session.sftp()?;
+        let dir = dir.into();
+        sftp.mkdir(Path::new(&dir), 0o755).ok();
 
-        Ok(Self {
-            session,
-            sftp,
-            dir: dir.into(),
-        })
+        Ok(Self { session, sftp, dir })
     }
 
     fn get_path(&self, filename: &Path) -> Result<PathBuf, Box<dyn Error + Send + Sync + 'static>> {

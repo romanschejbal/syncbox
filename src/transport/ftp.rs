@@ -63,6 +63,7 @@ impl Ftp<Disconnected> {
         }
         stream.set_mode(suppaftp::Mode::ExtendedPassive);
         stream.login(&self.user, &self.pass).await?;
+        stream.mkdir(&self.dir).await.ok();
         stream.cwd(&self.dir).await?;
         Ok(Ftp {
             host: self.host,
