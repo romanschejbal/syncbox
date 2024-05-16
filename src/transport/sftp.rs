@@ -24,7 +24,7 @@ impl SFtp {
         pass: impl AsRef<str>,
         dir: impl Into<String>,
     ) -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
-        let tcp = TcpStream::connect(format!("{host}:22", host = host.as_ref())).await?;
+        let tcp = TcpStream::connect(host.as_ref()).await?;
         let mut session = Session::new().unwrap();
         session.set_tcp_stream(tcp);
         session.handshake().unwrap();
