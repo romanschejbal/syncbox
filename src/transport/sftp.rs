@@ -34,12 +34,24 @@ impl SFtp {
             .unwrap();
 
         let sftp = session.sftp()?;
+        let dir = dir.into();
+        let dir_path = Path::new(&dir);
+        match sftp.readdir(dir_path) {
+            Ok(_) => {}
+            Err(_) => {
+                for part in dir_path
+                    .ancestors()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .filter(|part| !part.to_string_lossy().is_empty())
+                {
+                    sftp.mkdir(part, 0o755)?;
+                }
+            }
+        }
 
-        Ok(Self {
-            session,
-            sftp,
-            dir: dir.into(),
-        })
+        Ok(Self { session, sftp, dir })
     }
 
     fn get_path(&self, filename: &Path) -> Result<PathBuf, Box<dyn Error + Send + Sync + 'static>> {
