@@ -236,7 +236,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         style("[3/9]").dim().bold(),
     );
 
-    let mut transport = make_transport(&args).await?;
+    let mut transport = make_transport(&args)
+        .await
+        .map_err(|e| format!("Connection failed with error: {e}"))?;
 
     let previous_checksum_tree = match transport
         .read_last_checksum(Path::new(&args.checksum_file))
