@@ -52,8 +52,8 @@ jobs:
       - run: ls -la
       - name: Zip artifacts
         run: |
-          zip x86_64-unknown-linux-gnu.zip x86_64-unknown-linux-gnu/syncbox
-          zip aarch64-apple-darwin.zip aarch64-apple-darwin/syncbox
+          zip -j x86_64-unknown-linux-gnu.zip x86_64-unknown-linux-gnu/syncbox
+          zip -j aarch64-apple-darwin.zip aarch64-apple-darwin/syncbox
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
