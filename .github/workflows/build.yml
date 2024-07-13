@@ -17,8 +17,13 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            path: target/x86_64-unknown-linux-gnu/release/syncbox
           - os: macos-latest
             target: aarch64-apple-darwin
+            path: target/aarch64-apple-darwin/release/syncbox
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+            path: target\x86_64-pc-windows-gnu\release\syncbox.exe
 
     runs-on: ${{ matrix.os }}
 
@@ -31,13 +36,14 @@ jobs:
       - name: Build release
         run: cargo build --release --target ${{ matrix.target }}
       - name: Checksum
-        run: shasum -a 256 target/${{ matrix.target }}/release/syncbox
+        if : ${{ matrix.os != 'windows-latest' }}
+        run: shasum -a 256 ${{ matrix.path }}
       - name: Archive binaries
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
           path: |
-            target/${{ matrix.target }}/release/syncbox
+            ${{ matrix.path }}
           retention-days: 1
 
   release:
@@ -54,9 +60,11 @@ jobs:
         run: |
           zip -j x86_64-unknown-linux-gnu.zip x86_64-unknown-linux-gnu/syncbox
           zip -j aarch64-apple-darwin.zip aarch64-apple-darwin/syncbox
+          zip -j x86_64-pc-windows-gnu.zip x86_64-pc-windows-gnu/syncbox.exe
       - name: Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             x86_64-unknown-linux-gnu.zip
             aarch64-apple-darwin.zip
+            x86_64-pc-windows-gnu.zip

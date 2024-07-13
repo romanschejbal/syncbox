@@ -159,7 +159,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         OsString::from(".DS_Store"),
     ];
     ignored_files.push((&args.checksum_file).into());
-    let walker = ignore::WalkBuilder::new("./")
+    let walker = ignore::WalkBuilder::new(".")
         .hidden(false)
         .filter_entry(move |entry| !ignored_files.contains(&entry.file_name().to_os_string()))
         .add_custom_ignore_filename(".syncboxignore")
