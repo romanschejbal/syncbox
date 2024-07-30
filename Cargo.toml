@@ -2,7 +2,7 @@
 authors = ["Roman Schejbal <schejbalroman@gmail.com>"]
 edition = "2021"
 name = "syncbox"
-version = "0.5.3"
+version = "0.5.4"
 
 [dependencies]
 async-trait = "0.1.74"
