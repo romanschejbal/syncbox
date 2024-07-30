@@ -1,4 +1,7 @@
-use clap::Parser;
+use clap::{
+    builder::{styling::AnsiColor, Styles},
+    Parser,
+};
 use console::style;
 use core::panic;
 use futures::{future::try_join_all, stream, StreamExt};
@@ -27,9 +30,17 @@ use tokio::{fs, sync::Mutex};
 const PROGRESS_BAR_CHARS: &str = "▰▰▱";
 const DEFAULT_FILE_SIZE_THRESHOLD: u64 = 1;
 
+fn get_styles() -> Styles {
+    Styles::styled()
+        .header(AnsiColor::Yellow.on_default())
+        .usage(AnsiColor::Green.on_default())
+        .literal(AnsiColor::Green.on_default())
+        .placeholder(AnsiColor::Green.on_default())
+}
+
 /// Fast sync with remote filesystem
 #[derive(Parser, Debug, Clone)]
-#[command(version, about)]
+#[command(version, about, styles = get_styles())]
 struct Args {
     #[arg(
         long,
