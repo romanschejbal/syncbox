@@ -79,7 +79,7 @@ struct Args {
     #[arg(
         short,
         long,
-        help = "Concurrency limit",
+        help = "Concurrency limit for file operations",
         default_value_t = 1,
         env = "SYNCBOX_CONCURRENCY"
     )]
