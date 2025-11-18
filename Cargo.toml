@@ -6,6 +6,7 @@ version = "0.5.4"
 
 [dependencies]
 async-trait = "0.1.74"
+backon = "1.6"
 clap = {version = "4.4.10", features = ["derive", "env", "unicode"]}
 console = "0.15.7"
 dotenvy = "0.15.7"
