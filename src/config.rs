@@ -102,6 +102,14 @@ pub struct Args {
         env = "SYNCBOX_MAX_RETRY_DELAY"
     )]
     pub max_retry_delay: u64,
+
+    #[arg(
+        long,
+        help = "Enable automatic retry for transport operations",
+        default_value_t = false,
+        env = "SYNCBOX_ENABLE_RETRY_TRANSPORT"
+    )]
+    pub enable_retry_transport: bool,
 }
 
 #[derive(Clone, Debug, Parser)]

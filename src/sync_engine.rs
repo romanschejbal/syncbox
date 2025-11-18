@@ -3,7 +3,13 @@ use crate::config::{Args, TransportType};
 use crate::progress;
 use crate::reconciler::{Action, Reconciler};
 use crate::transport::{
-    dry::DryTransport, ftp::Ftp, local::LocalFilesystem, s3::AwsS3, sftp::SFtp, Transport,
+    dry::DryTransport,
+    ftp::Ftp,
+    local::LocalFilesystem,
+    retry::{ConfigBasedTransportFactory, RetryConfig, RetryTransport},
+    s3::AwsS3,
+    sftp::SFtp,
+    Transport,
 };
 use crate::utils::HumanBytes;
 use console::style;
@@ -645,6 +651,25 @@ impl SyncEngine {
     }
 
     async fn create_transport(
+        &self,
+    ) -> Result<Box<dyn Transport + Send + Sync>, Box<dyn Error + Send + Sync + 'static>> {
+        if self.args.enable_retry_transport {
+            self.create_single_retry_transport().await
+        } else {
+            self.create_single_base_transport().await
+        }
+    }
+
+    async fn create_single_retry_transport(
+        &self,
+    ) -> Result<Box<dyn Transport + Send + Sync>, Box<dyn Error + Send + Sync + 'static>> {
+        let factory = Arc::new(ConfigBasedTransportFactory::new(self.args.clone()));
+        let retry_config = RetryConfig::from_args(&self.args);
+        let retry_transport = RetryTransport::new(factory, retry_config);
+        Ok(Box::new(retry_transport) as Box<dyn Transport + Send + Sync>)
+    }
+
+    async fn create_single_base_transport(
         &self,
     ) -> Result<Box<dyn Transport + Send + Sync>, Box<dyn Error + Send + Sync + 'static>> {
         Ok(match &self.args.transport {
