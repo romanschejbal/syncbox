@@ -86,7 +86,6 @@ impl Transport for RetryTransport {
         &mut self,
         checksum_filename: &Path,
     ) -> Result<crate::checksum_tree::ChecksumTree, Box<dyn Error + Send + Sync + 'static>> {
-        // Custom retry logic for async methods
         let mut last_error = None;
         let mut delay = self.config.initial_delay;
 
@@ -130,7 +129,6 @@ impl Transport for RetryTransport {
         checksum_filename: &Path,
         checksum_tree: &crate::checksum_tree::ChecksumTree,
     ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
-        // Custom retry logic for async methods
         let mut last_error = None;
         let mut delay = self.config.initial_delay;
 
@@ -176,7 +174,6 @@ impl Transport for RetryTransport {
         &mut self,
         filename: &Path,
     ) -> Result<Vec<u8>, Box<dyn Error + Send + Sync + 'static>> {
-        // Custom retry logic for async methods
         let mut last_error = None;
         let mut delay = self.config.initial_delay;
 
@@ -216,7 +213,6 @@ impl Transport for RetryTransport {
     }
 
     async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-        // Custom retry logic for async methods
         let mut last_error = None;
         let mut delay = self.config.initial_delay;
 
@@ -303,7 +299,6 @@ impl Transport for RetryTransport {
         &mut self,
         pathname: &Path,
     ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-        // Custom retry logic for async methods
         let mut last_error = None;
         let mut delay = self.config.initial_delay;
 
