@@ -1,14 +1,9 @@
 use crate::checksum_tree::ChecksumTree;
-use crate::config::{Args, TransportType};
+use crate::config::Args;
 use crate::progress;
 use crate::reconciler::{Action, Reconciler};
 use crate::transport::{
-    dry::DryTransport,
-    ftp::Ftp,
-    local::LocalFilesystem,
-    retry::{ConfigBasedTransportFactory, RetryConfig, RetryTransport},
-    s3::AwsS3,
-    sftp::SFtp,
+    retry::{ConfigBasedTransportFactory, RetryConfig, RetryTransport, TransportFactory},
     Transport,
 };
 use crate::utils::HumanBytes;
@@ -391,7 +386,7 @@ impl SyncEngine {
         let upload_tasks = sorted_actions
             .into_iter()
             .enumerate()
-            .skip(self.args.skip.saturating_sub(0).max(0))
+            .skip(self.args.skip)
             .map(|(i, action)| {
                 let action = action.clone();
                 let total_bytes = Arc::clone(&total_bytes);
@@ -523,9 +518,10 @@ impl SyncEngine {
                 }
 
                 // Handle intermittent checksum upload
+                let finished_count = finished_paths.lock().await.len();
                 if intermittent_upload_interval > 0
-                    && finished_paths.lock().await.len() > 0
-                    && finished_paths.lock().await.len() % intermittent_upload_interval == 0
+                    && finished_count > 0
+                    && finished_count % intermittent_upload_interval == 0
                 {
                     pb.set_message("📸 Uploading intermittent checksum");
                     if let Err(e) = transport
@@ -576,7 +572,7 @@ impl SyncEngine {
         let removal_tasks = remove_actions
             .iter()
             .enumerate()
-            .skip(self.args.skip.saturating_sub(0).max(0))
+            .skip(self.args.skip)
             .map(|(i, action)| {
                 let action = action.clone();
                 let transport_pool = Arc::clone(&transport_pool);
@@ -672,42 +668,8 @@ impl SyncEngine {
     async fn create_single_base_transport(
         &self,
     ) -> Result<Box<dyn Transport + Send + Sync>, Box<dyn Error + Send + Sync + 'static>> {
-        Ok(match &self.args.transport {
-            TransportType::Ftp {
-                ftp_host,
-                ftp_user,
-                ftp_pass,
-                ftp_dir,
-                use_tls,
-            } => Box::new(
-                Ftp::new(ftp_host, ftp_user, ftp_pass, ftp_dir)
-                    .connect(*use_tls)
-                    .await?,
-            ),
-            TransportType::Sftp {
-                host,
-                user,
-                pass,
-                dir,
-            } => Box::new(SFtp::new(host, user, pass, dir).await?),
-            TransportType::Local { destination } => Box::new(LocalFilesystem::new(destination)),
-            TransportType::S3 {
-                bucket,
-                region,
-                access_key,
-                secret_key,
-                storage_class,
-                directory,
-            } => Box::new(AwsS3::new(
-                bucket,
-                region,
-                access_key,
-                secret_key,
-                storage_class,
-                directory.into(),
-            )?),
-            TransportType::Dry => Box::new(DryTransport),
-        })
+        let factory = ConfigBasedTransportFactory::new(self.args.clone());
+        factory.create().await
     }
 
     async fn create_transport_pool(

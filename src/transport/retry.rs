@@ -3,29 +3,10 @@
 //! This module provides a `RetryTransport` struct that wraps any transport implementation
 //! and automatically retries failed operations using exponential backoff. When an operation
 //! fails, the transport connection is dropped and a new one is created for the next attempt.
-//!
-//! # Example
-//!
-//! ```rust
-//! use syncbox::transport::retry::{RetryTransport, RetryConfig, ConfigBasedTransportFactory};
-//! use syncbox::config::Args;
-//! use std::sync::Arc;
-//!
-//! # async fn example() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-//! let args = Args::parse(); // Your app args
-//! let factory = Arc::new(ConfigBasedTransportFactory::new(args.clone()));
-//! let retry_config = RetryConfig::from_args(&args);
-//!
-//! let mut retry_transport = RetryTransport::new(factory, retry_config);
-//!
-//! // Operations will automatically retry on failure
-//! let data = retry_transport.read(std::path::Path::new("file.txt")).await?;
-//! # Ok(())
-//! # }
-//! ```
 
 use super::Transport;
 use crate::config::Args;
+use rand::Rng;
 use std::{error::Error, path::Path, sync::Arc, time::Duration};
 use tokio::{io::AsyncRead, time::sleep};
 
@@ -63,6 +44,55 @@ impl RetryConfig {
     }
 }
 
+fn delay_with_jitter(delay: Duration) -> Duration {
+    let jitter_ms = delay.as_millis() / 4;
+    if jitter_ms == 0 {
+        return delay;
+    }
+    let jitter = rand::thread_rng().gen_range(0..=jitter_ms) as u64;
+    delay + Duration::from_millis(jitter)
+}
+
+/// Macro to deduplicate retry loop logic for retryable operations.
+macro_rules! retry_op {
+    ($self:ident, |$transport:ident| $op:expr) => {{
+        let mut last_error = None;
+        let mut delay = $self.config.initial_delay;
+
+        for attempt in 0..=$self.config.max_retries {
+            if $self.transport.is_none() {
+                match $self.factory.create().await {
+                    Ok(transport) => $self.transport = Some(transport),
+                    Err(e) => {
+                        last_error = Some(e);
+                        if attempt < $self.config.max_retries {
+                            sleep(delay_with_jitter(delay)).await;
+                            delay = std::cmp::min(delay * 2, $self.config.max_delay);
+                        }
+                        continue;
+                    }
+                }
+            }
+
+            if let Some($transport) = &mut $self.transport {
+                match $op.await {
+                    Ok(result) => return Ok(result),
+                    Err(e) => {
+                        last_error = Some(e);
+                        $self.transport = None;
+                        if attempt < $self.config.max_retries {
+                            sleep(delay_with_jitter(delay)).await;
+                            delay = std::cmp::min(delay * 2, $self.config.max_delay);
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| "All retry attempts failed".into()))
+    }};
+}
+
 /// A transport wrapper that provides automatic retry functionality with exponential backoff
 pub struct RetryTransport {
     factory: Arc<dyn TransportFactory>,
@@ -82,173 +112,15 @@ impl RetryTransport {
 
 #[async_trait::async_trait]
 impl Transport for RetryTransport {
-    async fn read_last_checksum(
-        &mut self,
-        checksum_filename: &Path,
-    ) -> Result<crate::checksum_tree::ChecksumTree, Box<dyn Error + Send + Sync + 'static>> {
-        let mut last_error = None;
-        let mut delay = self.config.initial_delay;
-
-        for attempt in 0..=self.config.max_retries {
-            // Ensure we have a transport instance
-            if self.transport.is_none() {
-                match self.factory.create().await {
-                    Ok(transport) => self.transport = Some(transport),
-                    Err(e) => {
-                        last_error = Some(e);
-                        if attempt < self.config.max_retries {
-                            sleep(delay).await;
-                            delay = std::cmp::min(delay * 2, self.config.max_delay);
-                        }
-                        continue;
-                    }
-                }
-            }
-
-            // Execute the operation
-            if let Some(transport) = &mut self.transport {
-                match transport.read_last_checksum(checksum_filename).await {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        last_error = Some(e);
-                        self.transport = None;
-                        if attempt < self.config.max_retries {
-                            sleep(delay).await;
-                            delay = std::cmp::min(delay * 2, self.config.max_delay);
-                        }
-                    }
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| "All retry attempts failed".into()))
-    }
-
-    async fn write_last_checksum(
-        &mut self,
-        checksum_filename: &Path,
-        checksum_tree: &crate::checksum_tree::ChecksumTree,
-    ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
-        let mut last_error = None;
-        let mut delay = self.config.initial_delay;
-
-        for attempt in 0..=self.config.max_retries {
-            // Ensure we have a transport instance
-            if self.transport.is_none() {
-                match self.factory.create().await {
-                    Ok(transport) => self.transport = Some(transport),
-                    Err(e) => {
-                        last_error = Some(e);
-                        if attempt < self.config.max_retries {
-                            sleep(delay).await;
-                            delay = std::cmp::min(delay * 2, self.config.max_delay);
-                        }
-                        continue;
-                    }
-                }
-            }
-
-            // Execute the operation
-            if let Some(transport) = &mut self.transport {
-                match transport
-                    .write_last_checksum(checksum_filename, checksum_tree)
-                    .await
-                {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        last_error = Some(e);
-                        self.transport = None;
-                        if attempt < self.config.max_retries {
-                            sleep(delay).await;
-                            delay = std::cmp::min(delay * 2, self.config.max_delay);
-                        }
-                    }
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| "All retry attempts failed".into()))
-    }
-
     async fn read(
         &mut self,
         filename: &Path,
     ) -> Result<Vec<u8>, Box<dyn Error + Send + Sync + 'static>> {
-        let mut last_error = None;
-        let mut delay = self.config.initial_delay;
-
-        for attempt in 0..=self.config.max_retries {
-            // Ensure we have a transport instance
-            if self.transport.is_none() {
-                match self.factory.create().await {
-                    Ok(transport) => self.transport = Some(transport),
-                    Err(e) => {
-                        last_error = Some(e);
-                        if attempt < self.config.max_retries {
-                            sleep(delay).await;
-                            delay = std::cmp::min(delay * 2, self.config.max_delay);
-                        }
-                        continue;
-                    }
-                }
-            }
-
-            // Execute the operation
-            if let Some(transport) = &mut self.transport {
-                match transport.read(filename).await {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        last_error = Some(e);
-                        self.transport = None;
-                        if attempt < self.config.max_retries {
-                            sleep(delay).await;
-                            delay = std::cmp::min(delay * 2, self.config.max_delay);
-                        }
-                    }
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| "All retry attempts failed".into()))
+        retry_op!(self, |transport| transport.read(filename))
     }
 
     async fn mkdir(&mut self, path: &Path) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-        let mut last_error = None;
-        let mut delay = self.config.initial_delay;
-
-        for attempt in 0..=self.config.max_retries {
-            // Ensure we have a transport instance
-            if self.transport.is_none() {
-                match self.factory.create().await {
-                    Ok(transport) => self.transport = Some(transport),
-                    Err(e) => {
-                        last_error = Some(e);
-                        if attempt < self.config.max_retries {
-                            sleep(delay).await;
-                            delay = std::cmp::min(delay * 2, self.config.max_delay);
-                        }
-                        continue;
-                    }
-                }
-            }
-
-            // Execute the operation
-            if let Some(transport) = &mut self.transport {
-                match transport.mkdir(path).await {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        last_error = Some(e);
-                        self.transport = None;
-                        if attempt < self.config.max_retries {
-                            sleep(delay).await;
-                            delay = std::cmp::min(delay * 2, self.config.max_delay);
-                        }
-                    }
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| "All retry attempts failed".into()))
+        retry_op!(self, |transport| transport.mkdir(path))
     }
 
     async fn write(
@@ -259,17 +131,15 @@ impl Transport for RetryTransport {
     ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
         // For write operations, we can only retry transport creation failures,
         // not write operation failures, because the AsyncRead reader is consumed.
-        // This ensures we have a working transport before attempting the write.
         let mut delay = self.config.initial_delay;
 
         for attempt in 0..=self.config.max_retries {
-            // Ensure we have a transport instance, with retry on creation failures
             if self.transport.is_none() {
                 match self.factory.create().await {
                     Ok(transport) => self.transport = Some(transport),
                     Err(e) => {
                         if attempt < self.config.max_retries {
-                            sleep(delay).await;
+                            sleep(delay_with_jitter(delay)).await;
                             delay = std::cmp::min(delay * 2, self.config.max_delay);
                             continue;
                         } else {
@@ -279,12 +149,10 @@ impl Transport for RetryTransport {
                 }
             }
 
-            // Execute the write operation (no retry here due to reader consumption)
             if let Some(transport) = &mut self.transport {
                 return match transport.write(filename, reader, file_size).await {
                     Ok(result) => Ok(result),
                     Err(e) => {
-                        // Drop the failed transport for future operations
                         self.transport = None;
                         Err(e)
                     }
@@ -299,42 +167,7 @@ impl Transport for RetryTransport {
         &mut self,
         pathname: &Path,
     ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-        let mut last_error = None;
-        let mut delay = self.config.initial_delay;
-
-        for attempt in 0..=self.config.max_retries {
-            // Ensure we have a transport instance
-            if self.transport.is_none() {
-                match self.factory.create().await {
-                    Ok(transport) => self.transport = Some(transport),
-                    Err(e) => {
-                        last_error = Some(e);
-                        if attempt < self.config.max_retries {
-                            sleep(delay).await;
-                            delay = std::cmp::min(delay * 2, self.config.max_delay);
-                        }
-                        continue;
-                    }
-                }
-            }
-
-            // Execute the operation
-            if let Some(transport) = &mut self.transport {
-                match transport.remove(pathname).await {
-                    Ok(result) => return Ok(result),
-                    Err(e) => {
-                        last_error = Some(e);
-                        self.transport = None;
-                        if attempt < self.config.max_retries {
-                            sleep(delay).await;
-                            delay = std::cmp::min(delay * 2, self.config.max_delay);
-                        }
-                    }
-                }
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| "All retry attempts failed".into()))
+        retry_op!(self, |transport| transport.remove(pathname))
     }
 
     async fn close(mut self: Box<Self>) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
