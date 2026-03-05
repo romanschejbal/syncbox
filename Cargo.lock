@@ -1990,6 +1990,7 @@ dependencies = [
  "sha256",
  "ssh2",
  "suppaftp",
+ "tempfile",
  "tokio",
  "tokio-util",
 ]

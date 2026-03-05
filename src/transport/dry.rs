@@ -59,3 +59,30 @@ impl Transport for DryTransport {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn all_operations_succeed() {
+        let mut transport = DryTransport;
+
+        let read_result = transport.read(Path::new("file.txt")).await;
+        assert!(read_result.is_ok());
+
+        let mkdir_result = transport.mkdir(Path::new("dir")).await;
+        assert!(mkdir_result.is_ok());
+
+        let remove_result = transport.remove(Path::new("file.txt")).await;
+        assert!(remove_result.is_ok());
+
+        let reader: Box<dyn AsyncRead + Unpin + Send> = Box::new(Cursor::new(vec![1, 2, 3]));
+        let write_result = transport.write(Path::new("file.txt"), reader, 3).await;
+        assert!(write_result.is_ok());
+        assert_eq!(write_result.unwrap(), 3);
+
+        let close_result = Box::new(DryTransport).close().await;
+        assert!(close_result.is_ok());
+    }
+}

@@ -239,3 +239,102 @@ impl TransportFactory for ConfigBasedTransportFactory {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct MockTransport;
+
+    #[async_trait::async_trait]
+    impl Transport for MockTransport {
+        async fn read(
+            &mut self,
+            _filename: &Path,
+        ) -> Result<Vec<u8>, Box<dyn Error + Send + Sync + 'static>> {
+            Ok(vec![1, 2, 3])
+        }
+        async fn mkdir(
+            &mut self,
+            _path: &Path,
+        ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+            Ok(())
+        }
+        async fn write(
+            &mut self,
+            _filename: &Path,
+            _reader: Box<dyn AsyncRead + Unpin + Send>,
+            _file_size: u64,
+        ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
+            Ok(0)
+        }
+        async fn remove(
+            &mut self,
+            _pathname: &Path,
+        ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+            Ok(())
+        }
+        async fn close(self: Box<Self>) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+            Ok(())
+        }
+    }
+
+    struct MockFactory {
+        fail_count: AtomicUsize,
+        max_failures: usize,
+    }
+
+    impl MockFactory {
+        fn new(max_failures: usize) -> Self {
+            Self {
+                fail_count: AtomicUsize::new(0),
+                max_failures,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl TransportFactory for MockFactory {
+        async fn create(
+            &self,
+        ) -> Result<Box<dyn Transport + Send + Sync>, Box<dyn Error + Send + Sync + 'static>>
+        {
+            let count = self.fail_count.fetch_add(1, Ordering::SeqCst);
+            if count < self.max_failures {
+                Err(format!("mock failure {}", count).into())
+            } else {
+                Ok(Box::new(MockTransport))
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn retry_succeeds_after_failures() {
+        let factory = Arc::new(MockFactory::new(2));
+        let config = RetryConfig::new(3, 1, 1);
+        let mut transport = RetryTransport::new(factory, config);
+
+        let result = transport.read(Path::new("test.txt")).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn retry_exhausted_returns_error() {
+        let factory = Arc::new(MockFactory::new(100)); // always fail
+        let config = RetryConfig::new(2, 1, 1);
+        let mut transport = RetryTransport::new(factory, config);
+
+        let result = transport.read(Path::new("test.txt")).await;
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn retry_config_construction() {
+        let config = RetryConfig::new(5, 100, 30);
+        assert_eq!(config.max_retries, 5);
+        assert_eq!(config.initial_delay, Duration::from_millis(100));
+        assert_eq!(config.max_delay, Duration::from_secs(30));
+    }
+}
