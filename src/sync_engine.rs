@@ -111,7 +111,7 @@ impl SyncEngine {
             .into_iter()
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
-            .filter(|entry| entry.file_type().map_or(false, |t| t.is_file()))
+            .filter(|entry| entry.file_type().is_some_and(|t| t.is_file()))
             .map(|entry| entry.path().to_string_lossy().to_string())
             .collect::<Vec<_>>();
 
@@ -231,7 +231,7 @@ impl SyncEngine {
         current: &ChecksumTree,
     ) -> Result<Vec<Action>, Box<dyn Error + Send + Sync + 'static>> {
         println!("{} 🚚 Reconciling changes", style("[4/9]").dim().bold());
-        Ok(Reconciler::reconcile(previous, current)?)
+        Reconciler::reconcile(previous, current)
     }
 
     async fn execute_sync_operations(
@@ -441,6 +441,7 @@ impl SyncEngine {
         Ok(upload_stats)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn upload_single_file(
         action: Action,
         index: usize,
