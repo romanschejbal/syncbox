@@ -372,7 +372,9 @@ mod tests {
         assert!(diff.contains(&Action::Mkdir("./gamma".into())));
         assert!(diff.contains(&Action::Put("./gamma/file3.txt".into())));
         // beta/file2.txt unchanged, should not appear
-        assert!(!diff.iter().any(|a| matches!(a, Action::Put(p) if p == &PathBuf::from("./beta/file2.txt"))));
+        assert!(!diff
+            .iter()
+            .any(|a| matches!(a, Action::Put(p) if p == &PathBuf::from("./beta/file2.txt"))));
     }
 
     #[test]

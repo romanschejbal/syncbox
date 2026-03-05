@@ -241,12 +241,10 @@ mod tests {
             ChecksumElement::Directory(root) => {
                 let dot = root.get(".").unwrap();
                 match dot {
-                    ChecksumElement::Directory(dir) => {
-                        match dir.get("file.txt").unwrap() {
-                            ChecksumElement::File(hash) => assert_eq!(hash, "abc123"),
-                            _ => panic!("expected File"),
-                        }
-                    }
+                    ChecksumElement::Directory(dir) => match dir.get("file.txt").unwrap() {
+                        ChecksumElement::File(hash) => assert_eq!(hash, "abc123"),
+                        _ => panic!("expected File"),
+                    },
                     _ => panic!("expected Directory"),
                 }
             }
@@ -268,8 +266,12 @@ mod tests {
                     _ => panic!("expected Directory"),
                 };
                 assert_eq!(dot.len(), 2);
-                assert!(matches!(dot.get("a.txt"), Some(ChecksumElement::File(h)) if h == "hash_a"));
-                assert!(matches!(dot.get("b.txt"), Some(ChecksumElement::File(h)) if h == "hash_b"));
+                assert!(
+                    matches!(dot.get("a.txt"), Some(ChecksumElement::File(h)) if h == "hash_a")
+                );
+                assert!(
+                    matches!(dot.get("b.txt"), Some(ChecksumElement::File(h)) if h == "hash_b")
+                );
             }
             _ => panic!("expected Directory"),
         }
@@ -336,7 +338,10 @@ mod tests {
         let tree2: ChecksumTree = map.into();
 
         let actions = Reconciler::reconcile(tree1, &tree2).unwrap();
-        assert!(actions.is_empty(), "identical trees should produce zero actions");
+        assert!(
+            actions.is_empty(),
+            "identical trees should produce zero actions"
+        );
     }
 
     #[test]

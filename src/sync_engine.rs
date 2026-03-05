@@ -569,49 +569,50 @@ impl SyncEngine {
 
         let transport_pool = Arc::new(Mutex::new(self.create_transport_pool().await?));
 
-        let removal_tasks = remove_actions
-            .iter()
-            .enumerate()
-            .skip(self.args.skip)
-            .map(|(i, action)| {
-                let action = action.clone();
-                let transport_pool = Arc::clone(&transport_pool);
-                let has_error = Arc::clone(has_error);
-                let total_removals = remove_actions.len();
+        let removal_tasks =
+            remove_actions
+                .iter()
+                .enumerate()
+                .skip(self.args.skip)
+                .map(|(i, action)| {
+                    let action = action.clone();
+                    let transport_pool = Arc::clone(&transport_pool);
+                    let has_error = Arc::clone(has_error);
+                    let total_removals = remove_actions.len();
 
-                tokio::spawn(async move {
-                    let mut transport = {
-                        let mut pool = transport_pool.lock().await;
-                        pool.pop().ok_or("No transport available")?
-                    };
+                    tokio::spawn(async move {
+                        let mut transport = {
+                            let mut pool = transport_pool.lock().await;
+                            pool.pop().ok_or("No transport available")?
+                        };
 
-                    let start_time = std::time::Instant::now();
-                    let result = match action {
-                        Action::Remove(path) => match transport.remove(path.as_path()).await {
-                            Ok(_) => {
-                                println!(
-                                    "✅ Removed {}/{} file: {:?} in {:.2?}s",
-                                    i + 1,
-                                    total_removals,
-                                    path,
-                                    start_time.elapsed().as_secs_f64(),
-                                );
-                                Ok(())
-                            }
-                            Err(error) => {
-                                eprintln!("❌ Error while removing {:?}: {}", path, error);
-                                has_error.store(true, SeqCst);
-                                Err(error)
-                            }
-                        },
-                        _ => unreachable!(),
-                    };
+                        let start_time = std::time::Instant::now();
+                        let result = match action {
+                            Action::Remove(path) => match transport.remove(path.as_path()).await {
+                                Ok(_) => {
+                                    println!(
+                                        "✅ Removed {}/{} file: {:?} in {:.2?}s",
+                                        i + 1,
+                                        total_removals,
+                                        path,
+                                        start_time.elapsed().as_secs_f64(),
+                                    );
+                                    Ok(())
+                                }
+                                Err(error) => {
+                                    eprintln!("❌ Error while removing {:?}: {}", path, error);
+                                    has_error.store(true, SeqCst);
+                                    Err(error)
+                                }
+                            },
+                            _ => unreachable!(),
+                        };
 
-                    // Return transport to pool
-                    transport_pool.lock().await.push(transport);
-                    result
-                })
-            });
+                        // Return transport to pool
+                        transport_pool.lock().await.push(transport);
+                        result
+                    })
+                });
 
         let results = stream::iter(removal_tasks)
             .buffer_unordered(self.args.concurrency)

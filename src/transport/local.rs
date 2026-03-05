@@ -77,7 +77,8 @@ mod tests {
         let mut transport = LocalFilesystem::new(tmp.path());
 
         let data = b"hello world";
-        let reader: Box<dyn AsyncRead + Unpin + Send> = Box::new(std::io::Cursor::new(data.to_vec()));
+        let reader: Box<dyn AsyncRead + Unpin + Send> =
+            Box::new(std::io::Cursor::new(data.to_vec()));
         transport
             .write(Path::new("test.txt"), reader, data.len() as u64)
             .await
@@ -103,7 +104,8 @@ mod tests {
 
         // Write a file first
         let data = b"to be removed";
-        let reader: Box<dyn AsyncRead + Unpin + Send> = Box::new(std::io::Cursor::new(data.to_vec()));
+        let reader: Box<dyn AsyncRead + Unpin + Send> =
+            Box::new(std::io::Cursor::new(data.to_vec()));
         transport
             .write(Path::new("removeme.txt"), reader, data.len() as u64)
             .await
