@@ -178,10 +178,6 @@ impl Transport for RetryTransport {
                 return match transport.write(filename, reader, file_size).await {
                     Ok(result) => Ok(result),
                     Err(e) => {
-                        eprintln!(
-                            "❌ Write failed for {:?}: {} (non-retryable, stream consumed)",
-                            filename, e
-                        );
                         self.transport = None;
                         Err(e)
                     }

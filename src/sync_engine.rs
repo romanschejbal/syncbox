@@ -19,7 +19,7 @@ use std::{
         atomic::{AtomicBool, AtomicU64, Ordering::SeqCst},
         Arc,
     },
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 use tokio::{fs, sync::Mutex};
 
@@ -461,8 +461,7 @@ impl SyncEngine {
             unreachable!()
         };
 
-        let file = fs::File::open(&path).await?;
-        let metadata = file.metadata().await?;
+        let metadata = fs::metadata(&path).await?;
         let file_size = metadata.len();
 
         // Get transport from pool
@@ -486,73 +485,105 @@ impl SyncEngine {
 
         pb.set_message(path.to_string_lossy().to_string());
 
-        // Create progress-tracking file reader
-        let pb_inner = Arc::clone(&pb);
-        let progress_file = progress::ProgressStream::new(
-            file,
-            Box::new(move |uploaded| {
-                pb_inner.set_position(uploaded);
-            }),
-        );
+        // Upload the file with retries (re-open file on each attempt)
+        const MAX_UPLOAD_RETRIES: usize = 3;
+        let mut last_error = None;
 
-        // Upload the file
-        match transport
-            .write(path.as_path(), Box::new(progress_file), file_size)
-            .await
-        {
-            Ok(bytes_written) => {
-                uploaded_bytes.fetch_add(bytes_written, SeqCst);
-                finished_paths.lock().await.insert(path.clone());
-
-                let remaining = total_bytes.load(SeqCst) - uploaded_bytes.load(SeqCst);
-                let message = format!(
-                    "{} | {} remaining",
-                    path.to_string_lossy(),
-                    remaining.to_human_size()
+        for attempt in 0..=MAX_UPLOAD_RETRIES {
+            if attempt > 0 {
+                let wait = Duration::from_millis(500 * 2u64.pow(attempt as u32 - 1));
+                eprintln!(
+                    "⚠️  Retrying upload for {:?} (attempt {}/{}) in {:.1}s...",
+                    path,
+                    attempt + 1,
+                    MAX_UPLOAD_RETRIES + 1,
+                    wait.as_secs_f64()
                 );
-
-                pb.finish_with_message(message.clone());
-
-                // Print success message in CI
-                if std::env::var("CI").is_ok() {
-                    println!("✅ {}", message);
-                }
-
-                // Handle intermittent checksum upload
-                let finished_count = finished_paths.lock().await.len();
-                if intermittent_upload_interval > 0
-                    && finished_count > 0
-                    && finished_count % intermittent_upload_interval == 0
-                {
-                    pb.set_message("📸 Uploading intermittent checksum");
-                    if let Err(e) = transport
-                        .write_last_checksum(checksum_path.as_path(), &checksum_tree)
-                        .await
-                    {
-                        pb.set_message(format!("❌ Error uploading intermittent checksum: {}", e));
-                    } else {
-                        pb.set_message(message);
-                    }
-                }
-
-                // Return transport to pool
+                // Return transport to pool before sleeping so others can use it
                 transport_pool.lock().await.push(transport);
-                Ok(bytes_written)
+                tokio::time::sleep(wait).await;
+                transport = {
+                    let mut pool = transport_pool.lock().await;
+                    pool.pop().ok_or("No transport available")?
+                };
+                pb.set_position(0);
             }
-            Err(error) => {
-                let message = format!("❌ Error while uploading {:?}: {}", path, error);
-                pb.abandon_with_message(message.clone());
-                has_error.store(true, SeqCst);
 
-                if std::env::var("CI").is_ok() {
-                    println!("{}", message);
+            // Open file and create progress stream fresh for each attempt
+            let file = fs::File::open(&path).await?;
+            let pb_inner = Arc::clone(&pb);
+            let progress_file = progress::ProgressStream::new(
+                file,
+                Box::new(move |uploaded| {
+                    pb_inner.set_position(uploaded);
+                }),
+            );
+
+            match transport
+                .write(path.as_path(), Box::new(progress_file), file_size)
+                .await
+            {
+                Ok(bytes_written) => {
+                    uploaded_bytes.fetch_add(bytes_written, SeqCst);
+                    finished_paths.lock().await.insert(path.clone());
+
+                    let remaining = total_bytes.load(SeqCst) - uploaded_bytes.load(SeqCst);
+                    let message = format!(
+                        "{} | {} remaining",
+                        path.to_string_lossy(),
+                        remaining.to_human_size()
+                    );
+
+                    pb.finish_with_message(message.clone());
+
+                    // Print success message in CI
+                    if std::env::var("CI").is_ok() {
+                        println!("✅ {}", message);
+                    }
+
+                    // Handle intermittent checksum upload
+                    let finished_count = finished_paths.lock().await.len();
+                    if intermittent_upload_interval > 0
+                        && finished_count > 0
+                        && finished_count % intermittent_upload_interval == 0
+                    {
+                        pb.set_message("📸 Uploading intermittent checksum");
+                        if let Err(e) = transport
+                            .write_last_checksum(checksum_path.as_path(), &checksum_tree)
+                            .await
+                        {
+                            pb.set_message(format!(
+                                "❌ Error uploading intermittent checksum: {}",
+                                e
+                            ));
+                        } else {
+                            pb.set_message(message);
+                        }
+                    }
+
+                    // Return transport to pool
+                    transport_pool.lock().await.push(transport);
+                    return Ok(bytes_written);
                 }
-
-                // Return transport to pool even on error
-                transport_pool.lock().await.push(transport);
-                Err(error)
+                Err(error) => {
+                    eprintln!("❌ Upload failed for {:?}: {}", path, error);
+                    last_error = Some(error);
+                }
             }
         }
+
+        let error = last_error.unwrap();
+        let message = format!("❌ Error while uploading {:?}: {}", path, error);
+        pb.abandon_with_message(message.clone());
+        has_error.store(true, SeqCst);
+
+        if std::env::var("CI").is_ok() {
+            println!("{}", message);
+        }
+
+        // Return transport to pool even on error
+        transport_pool.lock().await.push(transport);
+        Err(error)
     }
 
     async fn execute_file_removals(
