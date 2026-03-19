@@ -5,9 +5,10 @@
 //! fails, the transport connection is dropped and a new one is created for the next attempt.
 
 use super::Transport;
+use crate::checksum_tree::ChecksumTree;
 use crate::config::Args;
 use rand::Rng;
-use std::{error::Error, path::Path, sync::Arc, time::Duration};
+use std::{error::Error, io::Cursor, path::Path, sync::Arc, time::Duration};
 use tokio::{io::AsyncRead, time::sleep};
 
 /// A factory trait for creating transport instances
@@ -161,6 +162,55 @@ impl Transport for RetryTransport {
         }
 
         Err("Failed to create transport for write operation".into())
+    }
+
+    async fn write_last_checksum(
+        &mut self,
+        checksum_filename: &Path,
+        checksum_tree: &ChecksumTree,
+    ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
+        // Unlike generic write(), the checksum data can be recreated on each attempt,
+        // so we can fully retry both transport creation and the write operation.
+        let mut last_error = None;
+        let mut delay = self.config.initial_delay;
+
+        for attempt in 0..=self.config.max_retries {
+            if self.transport.is_none() {
+                match self.factory.create().await {
+                    Ok(transport) => self.transport = Some(transport),
+                    Err(e) => {
+                        last_error = Some(e);
+                        if attempt < self.config.max_retries {
+                            sleep(delay_with_jitter(delay)).await;
+                            delay = std::cmp::min(delay * 2, self.config.max_delay);
+                        }
+                        continue;
+                    }
+                }
+            }
+
+            if let Some(transport) = &mut self.transport {
+                let json = checksum_tree.to_gzip()?;
+                let file_size = json.len() as u64;
+                let cursor = Cursor::new(json);
+                match transport
+                    .write(checksum_filename, Box::new(cursor), file_size)
+                    .await
+                {
+                    Ok(result) => return Ok(result),
+                    Err(e) => {
+                        last_error = Some(e);
+                        self.transport = None;
+                        if attempt < self.config.max_retries {
+                            sleep(delay_with_jitter(delay)).await;
+                            delay = std::cmp::min(delay * 2, self.config.max_delay);
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| "All retry attempts failed for checksum upload".into()))
     }
 
     async fn remove(
@@ -336,5 +386,102 @@ mod tests {
         assert_eq!(config.max_retries, 5);
         assert_eq!(config.initial_delay, Duration::from_millis(100));
         assert_eq!(config.max_delay, Duration::from_secs(30));
+    }
+
+    /// A mock transport whose write() fails a configurable number of times before succeeding.
+    struct FailingWriteTransport {
+        write_fail_count: Arc<AtomicUsize>,
+        write_max_failures: usize,
+    }
+
+    #[async_trait::async_trait]
+    impl Transport for FailingWriteTransport {
+        async fn read(
+            &mut self,
+            _filename: &Path,
+        ) -> Result<Vec<u8>, Box<dyn Error + Send + Sync + 'static>> {
+            Ok(vec![])
+        }
+        async fn mkdir(
+            &mut self,
+            _path: &Path,
+        ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+            Ok(())
+        }
+        async fn write(
+            &mut self,
+            _filename: &Path,
+            _reader: Box<dyn AsyncRead + Unpin + Send>,
+            _file_size: u64,
+        ) -> Result<u64, Box<dyn Error + Send + Sync + 'static>> {
+            let count = self.write_fail_count.fetch_add(1, Ordering::SeqCst);
+            if count < self.write_max_failures {
+                Err(format!("write failure {}", count).into())
+            } else {
+                Ok(_file_size)
+            }
+        }
+        async fn remove(
+            &mut self,
+            _pathname: &Path,
+        ) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+            Ok(())
+        }
+        async fn close(self: Box<Self>) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+            Ok(())
+        }
+    }
+
+    struct FailingWriteFactory {
+        write_fail_count: Arc<AtomicUsize>,
+        write_max_failures: usize,
+    }
+
+    impl FailingWriteFactory {
+        fn new(write_max_failures: usize) -> Self {
+            Self {
+                write_fail_count: Arc::new(AtomicUsize::new(0)),
+                write_max_failures,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl TransportFactory for FailingWriteFactory {
+        async fn create(
+            &self,
+        ) -> Result<Box<dyn Transport + Send + Sync>, Box<dyn Error + Send + Sync + 'static>>
+        {
+            Ok(Box::new(FailingWriteTransport {
+                write_fail_count: self.write_fail_count.clone(),
+                write_max_failures: self.write_max_failures,
+            }))
+        }
+    }
+
+    #[tokio::test]
+    async fn write_last_checksum_retries_on_write_failure() {
+        let factory = Arc::new(FailingWriteFactory::new(2));
+        let config = RetryConfig::new(3, 1, 1);
+        let mut transport = RetryTransport::new(factory, config);
+        let checksum_tree = ChecksumTree::default();
+
+        let result = transport
+            .write_last_checksum(Path::new("checksum.gz"), &checksum_tree)
+            .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn write_last_checksum_exhausted_returns_error() {
+        let factory = Arc::new(FailingWriteFactory::new(100)); // always fail
+        let config = RetryConfig::new(2, 1, 1);
+        let mut transport = RetryTransport::new(factory, config);
+        let checksum_tree = ChecksumTree::default();
+
+        let result = transport
+            .write_last_checksum(Path::new("checksum.gz"), &checksum_tree)
+            .await;
+        assert!(result.is_err());
     }
 }
