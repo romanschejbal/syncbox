@@ -65,9 +65,17 @@ macro_rules! retry_op {
                 match $self.factory.create().await {
                     Ok(transport) => $self.transport = Some(transport),
                     Err(e) => {
+                        eprintln!(
+                            "⚠️  Transport creation failed (attempt {}/{}): {}",
+                            attempt + 1,
+                            $self.config.max_retries + 1,
+                            e
+                        );
                         last_error = Some(e);
                         if attempt < $self.config.max_retries {
-                            sleep(delay_with_jitter(delay)).await;
+                            let wait = delay_with_jitter(delay);
+                            eprintln!("   Retrying in {:.1}s...", wait.as_secs_f64());
+                            sleep(wait).await;
                             delay = std::cmp::min(delay * 2, $self.config.max_delay);
                         }
                         continue;
@@ -79,10 +87,18 @@ macro_rules! retry_op {
                 match $op.await {
                     Ok(result) => return Ok(result),
                     Err(e) => {
+                        eprintln!(
+                            "⚠️  Operation failed (attempt {}/{}): {}",
+                            attempt + 1,
+                            $self.config.max_retries + 1,
+                            e
+                        );
                         last_error = Some(e);
                         $self.transport = None;
                         if attempt < $self.config.max_retries {
-                            sleep(delay_with_jitter(delay)).await;
+                            let wait = delay_with_jitter(delay);
+                            eprintln!("   Retrying in {:.1}s...", wait.as_secs_f64());
+                            sleep(wait).await;
                             delay = std::cmp::min(delay * 2, $self.config.max_delay);
                         }
                     }
@@ -139,8 +155,16 @@ impl Transport for RetryTransport {
                 match self.factory.create().await {
                     Ok(transport) => self.transport = Some(transport),
                     Err(e) => {
+                        eprintln!(
+                            "⚠️  Transport creation failed for write (attempt {}/{}): {}",
+                            attempt + 1,
+                            self.config.max_retries + 1,
+                            e
+                        );
                         if attempt < self.config.max_retries {
-                            sleep(delay_with_jitter(delay)).await;
+                            let wait = delay_with_jitter(delay);
+                            eprintln!("   Retrying in {:.1}s...", wait.as_secs_f64());
+                            sleep(wait).await;
                             delay = std::cmp::min(delay * 2, self.config.max_delay);
                             continue;
                         } else {
@@ -154,6 +178,10 @@ impl Transport for RetryTransport {
                 return match transport.write(filename, reader, file_size).await {
                     Ok(result) => Ok(result),
                     Err(e) => {
+                        eprintln!(
+                            "❌ Write failed for {:?}: {} (non-retryable, stream consumed)",
+                            filename, e
+                        );
                         self.transport = None;
                         Err(e)
                     }
@@ -179,9 +207,17 @@ impl Transport for RetryTransport {
                 match self.factory.create().await {
                     Ok(transport) => self.transport = Some(transport),
                     Err(e) => {
+                        eprintln!(
+                            "⚠️  Transport creation failed for checksum upload (attempt {}/{}): {}",
+                            attempt + 1,
+                            self.config.max_retries + 1,
+                            e
+                        );
                         last_error = Some(e);
                         if attempt < self.config.max_retries {
-                            sleep(delay_with_jitter(delay)).await;
+                            let wait = delay_with_jitter(delay);
+                            eprintln!("   Retrying in {:.1}s...", wait.as_secs_f64());
+                            sleep(wait).await;
                             delay = std::cmp::min(delay * 2, self.config.max_delay);
                         }
                         continue;
@@ -199,10 +235,18 @@ impl Transport for RetryTransport {
                 {
                     Ok(result) => return Ok(result),
                     Err(e) => {
+                        eprintln!(
+                            "⚠️  Checksum upload failed (attempt {}/{}): {}",
+                            attempt + 1,
+                            self.config.max_retries + 1,
+                            e
+                        );
                         last_error = Some(e);
                         self.transport = None;
                         if attempt < self.config.max_retries {
-                            sleep(delay_with_jitter(delay)).await;
+                            let wait = delay_with_jitter(delay);
+                            eprintln!("   Retrying in {:.1}s...", wait.as_secs_f64());
+                            sleep(wait).await;
                             delay = std::cmp::min(delay * 2, self.config.max_delay);
                         }
                     }
