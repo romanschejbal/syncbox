@@ -106,7 +106,7 @@ pub struct Args {
     #[arg(
         long,
         help = "Enable automatic retry for transport operations",
-        default_value_t = false,
+        default_value_t = true,
         env = "SYNCBOX_ENABLE_RETRY_TRANSPORT"
     )]
     pub enable_retry_transport: bool,
