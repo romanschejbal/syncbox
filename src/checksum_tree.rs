@@ -162,7 +162,6 @@ impl DerefMut for ChecksumTree {
 }
 
 #[cfg(test)]
-
 mod tests {
     use super::*;
 
@@ -229,6 +228,147 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&checksum).unwrap(),
             r#"{"version":"0.3.0","root":{"Directory":{"dirrr":{"Directory":{"DSC05947.ARW":{"File":"a4849b4f83f996ef9ce68b9f8561db4a991ab5f9dce3c52a45267c8e274bb73a"}}}}}}"#
+        );
+    }
+
+    #[test]
+    fn from_hashmap_single_file() {
+        let mut map = HashMap::new();
+        map.insert("./file.txt".to_string(), "abc123".to_string());
+        let tree: ChecksumTree = map.into();
+
+        match tree.as_ref().unwrap() {
+            ChecksumElement::Directory(root) => {
+                let dot = root.get(".").unwrap();
+                match dot {
+                    ChecksumElement::Directory(dir) => match dir.get("file.txt").unwrap() {
+                        ChecksumElement::File(hash) => assert_eq!(hash, "abc123"),
+                        _ => panic!("expected File"),
+                    },
+                    _ => panic!("expected Directory"),
+                }
+            }
+            _ => panic!("expected Directory"),
+        }
+    }
+
+    #[test]
+    fn from_hashmap_multiple_files_same_directory() {
+        let mut map = HashMap::new();
+        map.insert("./a.txt".to_string(), "hash_a".to_string());
+        map.insert("./b.txt".to_string(), "hash_b".to_string());
+        let tree: ChecksumTree = map.into();
+
+        match tree.as_ref().unwrap() {
+            ChecksumElement::Directory(root) => {
+                let dot = match root.get(".").unwrap() {
+                    ChecksumElement::Directory(d) => d,
+                    _ => panic!("expected Directory"),
+                };
+                assert_eq!(dot.len(), 2);
+                assert!(
+                    matches!(dot.get("a.txt"), Some(ChecksumElement::File(h)) if h == "hash_a")
+                );
+                assert!(
+                    matches!(dot.get("b.txt"), Some(ChecksumElement::File(h)) if h == "hash_b")
+                );
+            }
+            _ => panic!("expected Directory"),
+        }
+    }
+
+    #[test]
+    fn from_hashmap_deeply_nested() {
+        let mut map = HashMap::new();
+        map.insert("./a/b/c/file.txt".to_string(), "deep_hash".to_string());
+        let tree: ChecksumTree = map.into();
+
+        // Navigate: root -> "." -> "a" -> "b" -> "c" -> "file.txt"
+        let root = match tree.as_ref().unwrap() {
+            ChecksumElement::Directory(d) => d,
+            _ => panic!(),
+        };
+        let dot = match root.get(".").unwrap() {
+            ChecksumElement::Directory(d) => d,
+            _ => panic!(),
+        };
+        let a = match dot.get("a").unwrap() {
+            ChecksumElement::Directory(d) => d,
+            _ => panic!(),
+        };
+        let b = match a.get("b").unwrap() {
+            ChecksumElement::Directory(d) => d,
+            _ => panic!(),
+        };
+        let c = match b.get("c").unwrap() {
+            ChecksumElement::Directory(d) => d,
+            _ => panic!(),
+        };
+        assert!(matches!(c.get("file.txt"), Some(ChecksumElement::File(h)) if h == "deep_hash"));
+    }
+
+    #[test]
+    fn from_hashmap_files_in_different_directories() {
+        let mut map = HashMap::new();
+        map.insert("./dir1/file1.txt".to_string(), "hash1".to_string());
+        map.insert("./dir2/file2.txt".to_string(), "hash2".to_string());
+        let tree: ChecksumTree = map.into();
+
+        let root = match tree.as_ref().unwrap() {
+            ChecksumElement::Directory(d) => d,
+            _ => panic!(),
+        };
+        let dot = match root.get(".").unwrap() {
+            ChecksumElement::Directory(d) => d,
+            _ => panic!(),
+        };
+        assert_eq!(dot.len(), 2);
+        assert!(dot.contains_key("dir1"));
+        assert!(dot.contains_key("dir2"));
+    }
+
+    #[test]
+    fn from_hashmap_roundtrip_through_reconciler() {
+        use crate::reconciler::Reconciler;
+
+        let mut map = HashMap::new();
+        map.insert("./dir/file.txt".to_string(), "hash1".to_string());
+        map.insert("./other/nested/file.txt".to_string(), "hash2".to_string());
+        let tree1: ChecksumTree = map.clone().into();
+        let tree2: ChecksumTree = map.into();
+
+        let actions = Reconciler::reconcile(tree1, &tree2).unwrap();
+        assert!(
+            actions.is_empty(),
+            "identical trees should produce zero actions"
+        );
+    }
+
+    #[test]
+    fn gzip_roundtrip() {
+        let mut map = HashMap::new();
+        map.insert("./dir/file.txt".to_string(), "hash123".to_string());
+        let tree: ChecksumTree = map.into();
+
+        let compressed = tree.to_gzip().unwrap();
+        let restored = ChecksumTree::from_gzip(&compressed).unwrap();
+
+        assert_eq!(
+            serde_json::to_string(&tree).unwrap(),
+            serde_json::to_string(&restored).unwrap()
+        );
+    }
+
+    #[test]
+    fn gzip_roundtrip_empty_tree() {
+        let tree = ChecksumTree::default();
+
+        let compressed = tree.to_gzip().unwrap();
+        let restored = ChecksumTree::from_gzip(&compressed).unwrap();
+
+        assert_eq!(
+            serde_json::to_string(&tree).unwrap(),
+            serde_json::to_string(&restored).unwrap()
         );
     }
 }

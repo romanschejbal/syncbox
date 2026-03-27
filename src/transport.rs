@@ -5,6 +5,7 @@ use tokio::io::AsyncRead;
 pub mod dry;
 pub mod ftp;
 pub mod local;
+pub mod retry;
 pub mod s3;
 pub mod sftp;
 

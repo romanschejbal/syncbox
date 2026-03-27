@@ -339,4 +339,46 @@ mod tests {
             )
         );
     }
+
+    #[test]
+    fn unchanged_file_produces_no_actions() {
+        let mut prev = HashMap::new();
+        prev.insert("./file.txt".to_string(), "same_hash".to_string());
+        let prev: ChecksumTree = prev.into();
+        let mut next = HashMap::new();
+        next.insert("./file.txt".to_string(), "same_hash".to_string());
+        let next: ChecksumTree = next.into();
+
+        let diff = Reconciler::reconcile(prev, &next).unwrap();
+        assert!(diff.is_empty());
+    }
+
+    #[test]
+    fn multiple_files_in_sibling_directories() {
+        let mut prev = HashMap::new();
+        prev.insert("./alpha/file1.txt".to_string(), "hash1".to_string());
+        prev.insert("./beta/file2.txt".to_string(), "hash2".to_string());
+        let prev: ChecksumTree = prev.into();
+
+        let mut next = HashMap::new();
+        next.insert("./alpha/file1.txt".to_string(), "hash1_changed".to_string());
+        next.insert("./beta/file2.txt".to_string(), "hash2".to_string());
+        next.insert("./gamma/file3.txt".to_string(), "hash3".to_string());
+        let next: ChecksumTree = next.into();
+
+        let diff = Reconciler::reconcile(prev, &next).unwrap();
+
+        assert!(diff.contains(&Action::Put("./alpha/file1.txt".into())));
+        assert!(diff.contains(&Action::Mkdir("./gamma".into())));
+        assert!(diff.contains(&Action::Put("./gamma/file3.txt".into())));
+        // beta/file2.txt unchanged, should not appear
+        assert!(!diff
+            .iter()
+            .any(|a| matches!(a, Action::Put(p) if p == &PathBuf::from("./beta/file2.txt"))));
+    }
+
+    #[test]
+    fn version_same_ok() {
+        assert_eq!(check_version("0.5.4", "0.5.4").ok(), Some(()));
+    }
 }
